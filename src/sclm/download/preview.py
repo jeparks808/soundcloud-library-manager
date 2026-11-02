@@ -16,6 +16,7 @@ from sclm.core.normalize import is_soundcloud_url
 from sclm.core.paths import AppPaths
 from sclm.core.settings import Settings
 from sclm.core.storage import Storage
+from sclm.download.enrich import enrich_playlist_info
 from sclm.download.errors import classify_ytdlp_error
 from sclm.download.mapping import ensure_full_audio, playlist_from_info
 from sclm.download.ytdlp_opts import prepare_cookiefile, preview_opts
@@ -46,6 +47,8 @@ def fetch_preview(url: str, settings: Settings, storage: Storage, *,
        ``is_partial=True`` where fields are missing and ``playlist_index`` = 1-based position.
        A single track URL -> ``PlaylistInfo(playlist_id=None, entries=(track,))``.
        A single track that only offers Go+ preview formats -> AuthRequiredError.
+       Set entries without a title are batch-looked up via ``download.enrich`` (API v2
+       ``tracks?ids=``, 50 per request); entries it can't resolve keep ``title=""``.
     3. For playlists, ``storage.sync_playlist(info)`` (membership first_seen/removed_at).
     4. ``storage.existing_track_paths(ids)`` -> ``PreviewEntry.existing_path``.
 
@@ -72,6 +75,11 @@ def fetch_preview(url: str, settings: Settings, storage: Storage, *,
         try:
             with factory(opts) as ydl:
                 info = ydl.extract_info(url, download=False)
+                if cancel.is_set():
+                    raise JobCancelled()
+                # Flat set entries have no title/artist/duration: batch-look them up
+                # (best effort, never raises except JobCancelled).
+                info = enrich_playlist_info(ydl, info, url, cancel=cancel)
         except SclmError:
             raise
         except Exception as exc:

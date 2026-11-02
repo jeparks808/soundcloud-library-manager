@@ -102,6 +102,26 @@ def test_enqueue_to_completed(run_one, make_track, listener, storage, app_paths,
     assert m.is_idle()
 
 
+def test_placeholder_title_never_reaches_finalize(run_one, make_track, fake_ydl, fake_finalize,
+                                                  storage, sc):
+    """A preview entry that couldn't be looked up is queued bare (or with a "Track <id>"
+    placeholder); the resolved full info overrides title/artist/duration before tagging and
+    naming."""
+    track = make_track("1001", title="Track 1001", artist="", duration_s=None,
+                       is_partial=True, album="The EP")
+    fake_ydl.add(track, info=sc.track("1001", webpage_url=track.url, original_url=track.url,
+                                      title="Real Song", track="Real Song",
+                                      uploader="Real Artist", duration=211.0))
+    _, job = run_one(track)
+    assert job.status == S.COMPLETED
+    [call] = fake_finalize.calls
+    assert call["track"].title == "Real Song" and call["track"].artist == "Real Artist"
+    assert call["track"].duration_s == pytest.approx(211.0)
+    assert call["track"].album == "The EP"
+    assert job.final_path.name == "Real Artist - Real Song [1001].mp3"
+    assert storage.get_track("1001").title == "Real Song"
+
+
 def test_download_options(run_one, make_track, fake_ydl, settings_store, settings, ffmpeg_exe,
                           app_paths):
     settings_store.update(settings.replace(bitrate_kbps=192))

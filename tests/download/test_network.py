@@ -41,6 +41,14 @@ def test_preview_public_playlist(settings, storage, app_paths):
     assert [e.track.playlist_index for e in res.entries] == \
         sorted(e.track.playlist_index for e in res.entries)
     assert set(res.sync.added) == {e.track.track_id for e in res.entries}
+    # yt-dlp's flat set entries carry no metadata; download.enrich must fill all of them
+    for e in res.entries:
+        t = e.track
+        assert t.title and t.title != f"Track {t.track_id}", t
+        assert t.artist, t
+        assert t.duration_s and t.duration_s > 0, t
+        assert t.album == "The Royal Concept EP", t
+        assert t.url.startswith("https://soundcloud.com/"), t
     # a second preview sees no membership change
     again = fetch_preview(TEST_SET_URL, settings, storage, paths=app_paths)
     assert again.sync.added == () and again.sync.removed == ()

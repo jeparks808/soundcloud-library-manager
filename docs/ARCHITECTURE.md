@@ -72,7 +72,7 @@ core ──► (stdlib, imageio_ffmpeg lazily)
 | `core.storage` | Stage 1 | SQLite repository (thread-safe), migrations |
 | `download.preview` | Stage 3 | `fetch_preview`: flat extraction, playlist sync, marks which tracks are new |
 | `download.manager` | Stage 3 | `DownloadManager`: queue, worker pool, per-job state machine, retry, cancel. **Orchestrates the post-download pipeline and owns every DB write in the download flow.** |
-| `download.*` internals | Stage 3 | yt-dlp option builder, info dict → `TrackInfo` mapping, error classification, yt-dlp logger adapter |
+| `download.*` internals | Stage 3 | yt-dlp option builder, info dict → `TrackInfo` mapping, flat-entry metadata lookup (`enrich`), error classification, yt-dlp logger adapter |
 | `metadata.pipeline` | Stage 4 | `finalize_track`: tag → content-hash check → organize (no-overwrite move) → optional Beets. Never writes to the DB. |
 | `metadata.duplicates` | Stage 4 | `find_duplicate` (pre-download lookup), `audio_sha256` |
 | `metadata.naming` | Stage 4 | `render_filename`, `sanitize_component` |
@@ -105,7 +105,10 @@ Step by step:
 1. **Paste URL.** The GUI calls `download.preview.fetch_preview(url, settings, storage,
    cancel=...)` through `gui.bridge.run_in_background`.
 2. **Preview.** yt-dlp `extract_info(url, download=False)` with
-   `extract_flat="in_playlist"` returns quickly. Entries become `TrackInfo(is_partial=True)`
+   `extract_flat="in_playlist"` returns quickly. yt-dlp's flat *set* entries carry only
+   id/url/album fields, so `download.enrich` batch-looks up title-less entries through
+   yt-dlp's SoundCloud client (API v2 `tracks?ids=`, 50 ids per request, best effort; entries
+   it can't resolve keep `title=""`). Entries become `TrackInfo(is_partial=True)`
    wherever fields are missing. For playlists, `storage.sync_playlist(info)` records
    membership: new tracks get `first_seen`, tracks that disappeared get `removed_at`.
    `storage.existing_track_paths(ids)` fills `PreviewEntry.existing_path`.

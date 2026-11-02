@@ -114,3 +114,18 @@ The lead confirmed it's gone.
 - **Issue #1 resolved.** New minor issue #7: the "(original MP3 kept)" label compares against the *current* target bitrate, so it can
   also appear on a transcoded file if the target was raised afterwards.
 - **Pending user action:** `sudo apt install libxcb-cursor0`, then the first manual GUI check.
+
+### Bug fix: playlist preview showed "Track <id>" titles (2026-11-02)
+- **User report (manual GUI test, first real-display run):** the GUI opens and fetch works, but every playlist track title is "Track XXXXXXXXX".
+  **This is the first manual GUI verification:** startup on the real display, URL fetch and preview table.
+- **Root cause (lead):** yt-dlp's `_extract_set` builds flat set entries with only id/url, with no title, uploader or duration.
+- **Ran as:** `general-purpose`, `model=opus`, `effort=high`, instructions from `sclm-downloader.md`.
+- **Fix:** `download/enrich.py` batch-resolves untitled entries via SoundCloud api-v2 `tracks?ids=` (50 per call) through yt-dlp's own
+  SoundCloud client, which keeps client_id handling and cookies. It's best effort and never fails the preview. Our own mapping avoids
+  yt-dlp's per-track artwork HEAD requests. Tests prove a placeholder can't reach tags or filenames.
+- **Measured (agent):** 484-track set: 10 API calls, 7.8 s preview (3.7 s without the lookup). 6-track EP: 1 call.
+- **Validation (lead):** full suite **551 passed, 4 skipped**; network **4 passed** (the EP test now asserts real titles).
+- **New issue #8 (found by lead's repeated runs):** in about 25% of repeated `tests/download tests/gui` runs, one test fails
+  (`test_clear_finished_and_jobs` or `test_e2e_offline` status-sequence). Cause: `DownloadManager._transition` updates the in-memory
+  job under the lock, then persists to the DB and emits to the listener after releasing it. Observers see the new state before the
+  DB or listener do. Concurrent transitions on one job could also persist or emit out of order. Assigned to Stage 5 (debugger, opus/xhigh).

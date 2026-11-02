@@ -123,6 +123,22 @@ def test_merge_resolved_keeps_queued_id_album_and_index(sc, make_track):
     assert merged.is_partial is False
 
 
+def test_merge_resolved_replaces_placeholder_title(sc, make_track):
+    """A queued entry the preview couldn't look up (bare, or carrying a "Track <id>"
+    placeholder) gets the resolved title/artist/duration at download time, so the
+    placeholder never reaches tags or filenames."""
+    resolved = trackinfo_from_info(sc.track("1001", title="Real Song", uploader="Real Artist",
+                                            artists=None, duration=211.0))
+    for queued_title in ("", "Track 1001"):
+        queued = make_track("1001", title=queued_title, artist="", duration_s=None,
+                            album="The EP", is_partial=True)
+        merged = merge_resolved(queued, resolved)
+        assert merged.title == "Real Song"
+        assert merged.artist == "Real Artist"
+        assert merged.duration_s == pytest.approx(211.0)
+        assert merged.album == "The EP" and merged.is_partial is False
+
+
 def test_merge_resolved_id_mismatch_keeps_queued(sc, make_track):
     merged = merge_resolved(make_track("1"), trackinfo_from_info(sc.track("999")))
     assert merged.track_id == "1"

@@ -6,7 +6,7 @@ hand in the GUI only) · **partial** · **todo**. Updated by the lead engineer a
 "Offscreen" GUI tests are automated pytest-qt tests on `QT_QPA_PLATFORM=offscreen`. They are **not** manual
 verification. **No manual GUI verification on a real display has been done yet.**
 
-Last test run (lead, 2026-11-02): `pytest -q` → **530 passed, 4 skipped**; `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
+Last test run (lead, 2026-11-02): `pytest -q` → **551 passed, 4 skipped** (but ~25% of repeated download+gui runs show 1 flaky failure, see R1); `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
 lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_STATUS.md, Stage 2–4).
 
 | # | Requirement | Stage | State | Evidence |
@@ -15,7 +15,7 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | A2 | Interfaces, error handling, data models, test strategy, dependency mgmt documented | 1 | done | docs/ARCHITECTURE.md, pyproject.toml, requirements*.txt |
 | G1 | Dark theme with orange accents | 2 | done+tested | tests/gui/test_theme.py; offscreen screenshots reviewed by lead |
 | G2 | SoundCloud URL input | 2 | done+tested | test_preview_panel (empty URL, Enter/fetch, error banner) |
-| G3 | Playlist preview | 2 | done+tested | test_preview_populates_table_and_preselects_only_new; network preview tests |
+| G3 | Playlist preview | 2/3 | done+tested | Titles/artists/durations for sets come from a batched api-v2 lookup (download/enrich.py, tests/download/test_enrich.py, 19 tests). Network EP test asserts real titles. Bug "Track <id>" titles reported by the user and fixed 2026-11-02 |
 | G4 | Track selection | 2 | done+tested | test_selection_produces_download_requests |
 | G5 | Download settings (bitrate, destination, new-only) | 2 | done+tested | test_settings_dialog.py; "Only new tracks" toggle in the preview panel |
 | G6 | Live progress indicators | 2 | done+tested | test_queue_view (worker-thread signals, coalescing at 10 Hz) |
@@ -45,7 +45,7 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | M7 | Optional Beets integration | 4 | done+tested | test_beets.py (real beets 2.14.1, tmp config; files untouched) |
 | M8 | Safe handling of missing/unreliable genre | 4 | done+tested | test_genre_titles.py |
 | M9 | Never overwrite user files without permission | 4 | done+tested | test_organizer (existing dest, EEXIST race, EXDEV, read-only); save_tags only on explicit Save |
-| R1 | Qt threading/signal handling | 5 | partial | bridge cross-thread tests pass; Stage 5 review pending |
+| R1 | Qt threading/signal handling | 5 | partial | bridge cross-thread tests pass. **Known race:** manager publishes in-memory state before the DB write + listener emit (flaky tests, possible out-of-order status). Assigned to Stage 5 |
 | R2 | Interrupted downloads | 5 | partial | cancel tests + staging cleanup + stale staging removed at startup; crash/kill mid-download not tested |
 | R3 | FFmpeg errors | 5 | partial | classification tests (test_errors); no test with a broken ffmpeg binary yet |
 | R4 | Malformed filenames | 5 | done+tested | test_naming.py |
@@ -54,7 +54,7 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | R7 | Duplicate files | 5 | done+tested | see M5/M9 |
 | R8 | Playlist changes | 5 | done+tested | preview sync added/removed tests |
 | R9 | Network interruptions | 5 | partial | retry/backoff tests with simulated errors; no real network-drop test |
-| R10 | Database consistency | 5 | partial | WAL, RLock, migrations tested; known stale `file_path` on retried rows (open issue #2) |
+| R10 | Database consistency | 5 | partial | WAL, RLock, migrations tested. Open: stale `file_path` on retried rows; transition ordering race (see R1) |
 | I1 | UI performance / resource use | 6 | partial | progress coalescing, model/view, paged queries; no measurements yet |
 | I2 | Accessibility / usability | 6 | partial | accessible names + shortcuts tested (test_main_controls_have_accessible_names) |
 | Q1 | Linux desktop launcher | 7 | partial | User ran packaging/install.sh successfully (launcher installed). Launching from it is blocked on the user's machine by missing libxcb-cursor0 (system lib) |
