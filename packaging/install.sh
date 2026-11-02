@@ -30,3 +30,7 @@ command -v desktop-file-validate >/dev/null && desktop-file-validate "$DESKTOP" 
 command -v update-desktop-database >/dev/null && update-desktop-database "$APPS" || true
 echo "Installed launcher: $DESKTOP"
 command -v ffmpeg >/dev/null || echo "Note: system ffmpeg not found; using the bundled imageio-ffmpeg binary. 'sudo apt install ffmpeg' is recommended."
+if command -v ldconfig >/dev/null 2>&1 && ! ldconfig -p 2>/dev/null | grep -q 'libxcb-cursor\.so\.0'; then
+  echo "Warning: libxcb-cursor.so.0 is missing; the Qt window system plugin cannot load without it."
+  echo "  Run: sudo apt install libxcb-cursor0"
+fi

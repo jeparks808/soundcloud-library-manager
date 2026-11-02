@@ -139,6 +139,11 @@ class SettingsDialog(QDialog):
         conv_box = QGroupBox("Conversion")
         conv_form = QFormLayout(conv_box)
         conv_form.addRow("Bitrate", self.bitrate_combo)
+        self.bitrate_hint = set_role(QLabel(
+            "Used when the source must be converted. MP3 sources are kept as-is to avoid "
+            "quality loss."), "muted")
+        self.bitrate_hint.setWordWrap(True)
+        conv_form.addRow("", self.bitrate_hint)
         conv_form.addRow("Parallel downloads", self.concurrency_spin)
         conv_form.addRow("", self.artwork_check)
 

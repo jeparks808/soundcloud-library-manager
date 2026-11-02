@@ -6,7 +6,7 @@ hand in the GUI only) · **partial** · **todo**. Updated by the lead engineer a
 "Offscreen" GUI tests are automated pytest-qt tests on `QT_QPA_PLATFORM=offscreen`. They are **not** manual
 verification. **No manual GUI verification on a real display has been done yet.**
 
-Last test run (lead, 2026-11-02): `pytest -q` → **520 passed, 4 skipped**; `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
+Last test run (lead, 2026-11-02): `pytest -q` → **530 passed, 4 skipped**; `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
 lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_STATUS.md, Stage 2–4).
 
 | # | Requirement | Stage | State | Evidence |
@@ -29,7 +29,7 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | D3 | Entire playlists | 3 | done+tested | test_preview (offline fixtures); network EP preview/sync test. A multi-track network *download* hasn't been run |
 | D4 | Per-track progress | 3 | done+tested | manager progress hook → ProgressEvent; lead e2e received progress events |
 | D5 | MP3 conversion | 3 | done+tested | test_e2e_offline (WAV→MP3 through real yt-dlp + ffmpeg) |
-| D6 | Configurable bitrate | 3 | **partial** | Applied when the source is re-encoded (test_e2e_offline measures 128/192 kbps). **MP3 sources are copied without re-encoding, so the setting is ignored for them** (lead e2e: 192 set → 128 kbps file). Open issue #1 |
+| D6 | Configurable bitrate | 3 | done+tested | Applied when the source is transcoded (test_e2e_offline 128/192 kbps). **User decision 2026-11-02:** MP3 sources are kept as-is (no lossy re-encode). The actual bitrate is measured and stored/shown (test_e2e_offline MP3 case, test_queue_view) |
 | D7 | Artwork + metadata embedding | 3/4 | done+tested | tests/metadata/test_tagging_duplicates.py; lead e2e: APIC + ID3v2.3 frames present |
 | D8 | Cancellation | 3 | done+tested | test_cancel_while_{queued,downloading,resolve,during_backoff}; real yt-dlp cancel in test_e2e_offline |
 | D9 | Retry handling | 3 | done+tested | test_network_retry_then_success, retries_exhausted, manual_retry_same_row |
@@ -57,5 +57,6 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | R10 | Database consistency | 5 | partial | WAL, RLock, migrations tested; known stale `file_path` on retried rows (open issue #2) |
 | I1 | UI performance / resource use | 6 | partial | progress coalescing, model/view, paged queries; no measurements yet |
 | I2 | Accessibility / usability | 6 | partial | accessible names + shortcuts tested (test_main_controls_have_accessible_names) |
-| Q1 | Linux desktop launcher | 7 | done (untested) | packaging/install.sh, sclm.desktop.in; app sets desktopFileName "sclm" |
+| Q1 | Linux desktop launcher | 7 | partial | User ran packaging/install.sh successfully (launcher installed). Launching from it is blocked on the user's machine by missing libxcb-cursor0 (system lib) |
+| Q3 | Clear startup failure when a Qt system lib is missing | 6 | done+tested | tests/core/test_platform_check.py (8); lead ran it against the real missing lib → message + exit 1 |
 | Q2 | No DRM/authorization bypass | all | done+tested | Go+ preview-only and DRM formats → AuthRequiredError (network test); cookies only pass the user's own login |

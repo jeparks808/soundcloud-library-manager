@@ -192,6 +192,7 @@ class DownloadManager:
         backoff_base_s: float = NETWORK_BACKOFF_BASE_S,
         max_attempts: int = NETWORK_MAX_ATTEMPTS,
         extra_ydl_opts: Mapping[str, Any] | None = None,
+        measure_bitrate: Callable[[Path], int | None] | None = None,
     ) -> None:
         if finalize is None:
             from sclm.metadata.pipeline import finalize_track
@@ -206,6 +207,7 @@ class DownloadManager:
         self._paths = paths
         self._listener: DownloadListener = listener or NullListener()
         self._finalize = finalize
+        self._measure_bitrate = measure_bitrate or measure_mp3_bitrate
         self._find_duplicate = find_duplicate
         self._ydl_factory = ydl_factory or _default_ydl_factory
         self._ffmpeg_resolver = ffmpeg_resolver or resolve_ffmpeg
@@ -601,6 +603,8 @@ class DownloadManager:
         finally:
             _rmtree(staging)
         bitrate = final.pop("_bitrate", None)
+        if bitrate is not None:
+            final["actual_bitrate_kbps"] = bitrate
         self._transition(job_id, strict=False, bitrate_kbps=bitrate, **final)
 
     def _attempt(self, job_id: int, settings: Settings, staging: Path,
@@ -685,6 +689,7 @@ class DownloadManager:
             result = ydl.process_ie_result(dict(info), download=True)
         _check_cancel(cancel)
         staged = _locate_mp3(result, staging)
+        actual_bitrate = self._measure_bitrate(staged)
 
         def on_stage(status: JobStatus) -> None:
             self._transition(job_id, status=JobStatus(status), fraction=None,
@@ -693,10 +698,10 @@ class DownloadManager:
         outcome = self._finalize(staged, track, playlist_title=job.playlist_title,
                                  settings=settings, storage=self._storage, force=job.force,
                                  on_stage=on_stage, cancel=cancel)
-        return self._record(job_id, track, outcome, settings)
+        return self._record(job_id, track, outcome, settings, actual_bitrate)
 
     def _record(self, job_id: int, track: TrackInfo, result: FinalizeResult,
-                settings: Settings) -> dict[str, Any]:
+                settings: Settings, actual_bitrate: int | None = None) -> dict[str, Any]:
         """Persist the finalize outcome (manager owns these DB writes). Never raises."""
         if result.outcome != FinalizeOutcome.PLACED:
             match = result.duplicate
@@ -734,7 +739,18 @@ class DownloadManager:
         if result.warnings:
             message += " (" + "; ".join(result.warnings) + ")"
         return {"status": JobStatus.COMPLETED, "final_path": final_path, "fraction": 1.0,
-                "error": None, "message": message, "_bitrate": settings.bitrate_kbps}
+                "error": None, "message": message, "_bitrate": actual_bitrate}
+
+
+def measure_mp3_bitrate(path: Path) -> int | None:
+    """Actual bitrate of an MP3 in kbps (rounded), or None if it cannot be measured."""
+    try:
+        from mutagen.mp3 import MP3
+        bitrate = MP3(path).info.bitrate
+        return round(bitrate / 1000) if bitrate else None
+    except Exception:
+        log.debug("Could not measure bitrate of %s", path, exc_info=True)
+        return None
 
 
 def error_info_for_record(exc: BaseException, final_path: Path) -> ErrorInfo:

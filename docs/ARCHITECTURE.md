@@ -667,8 +667,12 @@ Notes:
 - **ffmpeg.** The bundled imageio binary has no ffprobe. yt-dlp falls back to parsing
   `ffmpeg -i` output, which is enough for ExtractAudio.
 - **Bitrate.** SoundCloud sources are usually at most 160 kbps (Opus, AAC or 128k MP3), so
-  320 kbps sets the target encoding rate but does not add quality. If the source is already
-  MP3, yt-dlp may stream-copy it instead of re-encoding.
+  the configured bitrate (default 320) never adds quality. When the source is already MP3,
+  FFmpegExtractAudio stream-copies it and the setting is ignored: the original MP3 is kept to
+  avoid a lossy re-encode (a deliberate decision; there is no "always re-encode" option). The
+  setting applies only when a transcode is needed. After conversion the manager measures the
+  real bitrate with mutagen and stores it in `downloads.bitrate_kbps`; the queue and history
+  show that value, not the target.
 - **Resolve once.** At download time, resolve with `extract_info(url, download=False)`, run
   the duplicate pre-check, then call `ydl.process_ie_result(info, download=True)` so the page
   is not fetched twice.

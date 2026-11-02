@@ -190,6 +190,7 @@ class DownloadJob:
     final_path: Path | None = None      # set when COMPLETED
     duplicate_of: Path | None = None    # set when SKIPPED_DUPLICATE
     force: bool = False
+    actual_bitrate_kbps: int | None = None   # measured from the MP3 when COMPLETED
 
 
 @dataclass(frozen=True, slots=True)

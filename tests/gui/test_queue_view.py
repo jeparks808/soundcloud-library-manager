@@ -165,3 +165,15 @@ def test_tooltip_carries_error_detail(qtbot, ctx, make_job):
     view.model.set_jobs([make_job(1, JobStatus.FAILED, error=err)])
     tip = view.model.index(0, COL_MESSAGE).data(Qt.ItemDataRole.ToolTipRole)
     assert "Conversion failed" in tip and "line2" in tip
+
+
+def test_completed_details_show_actual_bitrate(qtbot, ctx, make_job):
+    from pathlib import Path
+    view = QueueView(ctx)
+    qtbot.addWidget(view)
+    assert view.model.target_kbps == 320
+    low = make_job(1, JobStatus.COMPLETED, final_path=Path("/m/a.mp3"), actual_bitrate_kbps=128)
+    full = make_job(2, JobStatus.COMPLETED, final_path=Path("/m/b.mp3"), actual_bitrate_kbps=320)
+    view.model.set_jobs([low, full])
+    assert view.model.index(0, COL_MESSAGE).data() == "a.mp3 · 128 kbps (original MP3 kept)"
+    assert view.model.index(1, COL_MESSAGE).data() == "b.mp3 · 320 kbps"

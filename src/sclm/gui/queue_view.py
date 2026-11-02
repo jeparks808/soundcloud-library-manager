@@ -48,7 +48,17 @@ FRACTION_ROLE = Qt.ItemDataRole.UserRole + 1
 JOB_ROLE = Qt.ItemDataRole.UserRole + 2
 
 
-def _progress_text(job: DownloadJob, event: ProgressEvent | None) -> str:
+def bitrate_note(actual_kbps: int | None, target_kbps: int | None = None) -> str:
+    """`` · 128 kbps (original MP3 kept)`` when below the target, else `` · 320 kbps``."""
+    if not actual_kbps:
+        return ""
+    if target_kbps and actual_kbps < target_kbps:
+        return f" · {actual_kbps} kbps (original MP3 kept)"
+    return f" · {actual_kbps} kbps"
+
+
+def _progress_text(job: DownloadJob, event: ProgressEvent | None,
+                   target_kbps: int | None = None) -> str:
     if job.message:
         return job.message
     if event is not None and job.status == JobStatus.DOWNLOADING:
@@ -61,7 +71,7 @@ def _progress_text(job: DownloadJob, event: ProgressEvent | None) -> str:
     if job.status == JobStatus.SKIPPED_DUPLICATE and job.duplicate_of is not None:
         return f"Already in library: {job.duplicate_of.name}"
     if job.status == JobStatus.COMPLETED and job.final_path is not None:
-        return job.final_path.name
+        return job.final_path.name + bitrate_note(job.actual_bitrate_kbps, target_kbps)
     return ""
 
 
@@ -76,6 +86,7 @@ class QueueModel(QAbstractTableModel):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        self.target_kbps: int | None = None   # configured bitrate, set by the view
         self._jobs: list[DownloadJob] = []
         self._row_of: dict[int, int] = {}
         self._events: dict[int, ProgressEvent] = {}      # last applied event per job (details)
@@ -115,7 +126,7 @@ class QueueModel(QAbstractTableModel):
                 return STATUS_LABELS[job.status]
             if col == COL_PROGRESS:
                 return f"{round(job.fraction * 100)}%" if job.fraction is not None else ""
-            return _progress_text(job, self._events.get(job.job_id))
+            return _progress_text(job, self._events.get(job.job_id), self.target_kbps)
         if role == FRACTION_ROLE and col == COL_PROGRESS:
             if job.status == JobStatus.COMPLETED:
                 return 1.0
@@ -309,6 +320,8 @@ class QueueView(QWidget):
         super().__init__(parent)
         self._ctx = ctx
         self.model = QueueModel(self)
+        self.model.target_kbps = ctx.settings.get().bitrate_kbps
+        ctx.settings.subscribe(lambda st: setattr(self.model, 'target_kbps', st.bitrate_kbps))
 
         self.table = QTableView()
         self.table.setModel(self.model)

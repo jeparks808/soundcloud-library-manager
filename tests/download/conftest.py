@@ -357,6 +357,8 @@ def make_manager(storage: Storage, settings_store: SettingsStore, app_paths: App
             "listener": listener, "finalize": fake_finalize,
             "find_duplicate": fake_find_duplicate, "ydl_factory": fake_ydl,
             "backoff_base_s": 0.05,
+            # fake staged files are not real MP3s; report the configured bitrate
+            "measure_bitrate": lambda _p: settings_store.get().bitrate_kbps,
         }
         kwargs.update(overrides)
         manager = DownloadManager(storage, settings_store, app_paths, **kwargs)

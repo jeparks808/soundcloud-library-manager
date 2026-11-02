@@ -87,7 +87,7 @@ def test_real_ytdlp_wav_to_mp3_at_bitrate(real_manager, wav_master, make_track, 
 
 
 def test_real_ytdlp_mp3_source(real_manager, tiny_mp3, make_track, fake_finalize,
-                               settings_store, settings, wait_until):
+                               settings_store, settings, wait_until, storage):
     """An MP3 source is already in the target codec; yt-dlp keeps it as a valid MP3."""
     settings_store.update(settings.replace(bitrate_kbps=320))
     rates: list[int] = []
@@ -99,6 +99,10 @@ def test_real_ytdlp_mp3_source(real_manager, tiny_mp3, make_track, fake_finalize
     wait_until(lambda: m.get_job(job.job_id).status.is_terminal, timeout=60)
     assert m.get_job(job.job_id).status == S.COMPLETED, m.get_job(job.job_id).error
     assert rates and round(rates[0] / 1000) in (128, 320)
+    # the source MP3 is kept as-is (not re-encoded to 320); the recorded bitrate is the real one
+    assert round(rates[0] / 1000) == 128
+    assert storage.get_download(job.job_id).bitrate_kbps == 128
+    assert m.get_job(job.job_id).actual_bitrate_kbps == 128
     assert src.is_file()                      # the source is never touched
 
 

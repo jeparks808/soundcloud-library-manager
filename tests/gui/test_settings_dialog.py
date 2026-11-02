@@ -103,3 +103,8 @@ def test_stale_probe_results_are_ignored(qtbot, ctx):
     dialog._probe_seq += 5
     dialog._on_probe(1, ("old", "old"))
     assert dialog.ffmpeg_info.text() != "old"
+
+
+def test_bitrate_hint_is_shown(qtbot, ctx):
+    dialog, _ = make_dialog(qtbot, ctx)
+    assert "MP3 sources are kept as-is" in dialog.bitrate_hint.text()

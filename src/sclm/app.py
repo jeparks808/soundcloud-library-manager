@@ -77,6 +77,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"sclm: startup failed: {exc}", file=sys.stderr)
         return 1
 
+    from sclm.core.platform_check import check_xcb_cursor
+
+    if not check_xcb_cursor():
+        return 1
+
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication(argv)

@@ -12,7 +12,8 @@ _Last updated: 2026-11-02_
 | yt-dlp | 2026.10.26 (venv). The system package 2024.04.09 is too old for SoundCloud and isn't used |
 | Mutagen | 1.48.1 (venv) |
 | Beets | 2.14.1 (venv, optional at runtime) |
-| FFmpeg | **No system ffmpeg.** Using the imageio-ffmpeg bundled binary 7.0.2 as a fallback. Recommend `sudo apt install ffmpeg` |
+| FFmpeg | System `ffmpeg`/`ffprobe` 6.1.1 at `/usr/bin` (the resolver prefers PATH). The initial environment check reported "command not found"; that was wrong, corrected after the user's `apt` showed it installed. The imageio-ffmpeg 7.0.2 bundled binary is the fallback |
+| Qt runtime libs | **`libxcb-cursor0` missing** on the user's machine, so Qt's xcb plugin aborts at startup. User action: `sudo apt install libxcb-cursor0` |
 | Display | X11 (`DISPLAY=:0`) |
 | Coding agent | Claude Code 2.1.316 (the active platform). Codex CLI 0.166.0 is installed but not running |
 
@@ -97,3 +98,19 @@ The lead confirmed it's gone.
 5. On filesystems without hard links, a process crash during the exclusive-create copy can leave a partial file.
 6. docs/ARCHITECTURE.md should be updated with the agents' documented deviations (test seams, the title→artist heuristic,
    namespaced user-list playlist ids, the cookies copy, the non-hardlink fallback).
+
+### First user run + minor fixes (2026-11-02)
+- **User report:** `python -m sclm` aborted with a core dump: Qt's xcb plugin needs `libxcb-cursor0`, which isn't installed.
+  `packaging/install.sh` ran fine. The user also confirmed system ffmpeg 6.1.1 is installed.
+- **User decision on issue #1:** keep original MP3s (no re-encode).
+- **Ran as:** `general-purpose`, `model=sonnet`, `effort=medium`, instructions from `sclm-improver.md` (Stage 6 config, minor changes).
+- **Changes:**
+  - `core/platform_check.py`: a pre-flight check before QApplication prints the apt command, shows a best-effort zenity/notify-send
+    dialog, and exits 1. `install.sh` warns too.
+  - The actual MP3 bitrate is measured with mutagen and stored in history and the job. The queue shows "· 128 kbps (original MP3 kept)".
+  - Settings shows a bitrate hint. ARCHITECTURE §13 is updated.
+- **Validation (lead):** `pytest -q` → **530 passed, 4 skipped**. The pre-flight was run against the genuinely missing library on this
+  machine (DISPLAY=:0, notifiers hidden from PATH): clear message, exit 1, no core dump. The zenity dialog itself was only tested with mocks.
+- **Issue #1 resolved.** New minor issue #7: the "(original MP3 kept)" label compares against the *current* target bitrate, so it can
+  also appear on a transcoded file if the target was raised afterwards.
+- **Pending user action:** `sudo apt install libxcb-cursor0`, then the first manual GUI check.
