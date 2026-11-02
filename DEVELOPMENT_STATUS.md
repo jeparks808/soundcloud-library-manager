@@ -157,3 +157,12 @@ The lead confirmed it's gone.
   preview). Agent additionally verified it works with the system libxcb-cursor hidden. Not yet verified: real-display window,
   double-click launch, Wayland (plugin not bundled). glibc ≥ 2.38 required. Frozen yt-dlp goes stale → updater planned.
 - **User decision:** AppImage goes on the Desktop, after all Stage 5 fixes are in.
+
+### yt-dlp self-updater ✅ (2026-11-02)
+- **Ran as:** implemented by the **lead session directly (Fable 5, the session model)**, not a stage subagent: Opus/Sonnet were
+  rate-limited until 06:20 (orchestration rule 8: strongest suitable available model, reported here).
+- Help → "Update yt-dlp…": checks PyPI, SHA-256-verifies the wheel, installs to `<data_dir>/yt-dlp-override/`; activated at next
+  start only when newer than the bundled copy, probe-imported, falls back on any problem. ARCHITECTURE §17.
+- **Validation:** full suite **592 passed, 4 skipped**; 16 updater tests + 2 GUI tests; real-PyPI run in a throwaway home →
+  correct "already up to date" no-op (venv has the current latest). The real-install path can only be exercised once a newer
+  release than the bundled one exists.

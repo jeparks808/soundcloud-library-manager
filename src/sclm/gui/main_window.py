@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from PySide6.QtCore import QSettings, QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
@@ -160,9 +161,52 @@ class MainWindow(QMainWindow):
             go_menu.addAction(action)
 
         help_menu = menubar.addMenu("&Help")
+        self._update_ytdlp_action = QAction("Update &yt-dlp…", self)
+        self._update_ytdlp_action.setStatusTip(
+            "Download the latest yt-dlp from PyPI; used after the next restart")
+        self._update_ytdlp_action.triggered.connect(
+            lambda _checked=False: self._update_ytdlp())
+        help_menu.addAction(self._update_ytdlp_action)
+        help_menu.addSeparator()
         about = QAction("&About", self)
         about.triggered.connect(self._show_about)
         help_menu.addAction(about)
+
+    def _update_ytdlp(self, *, update_fn: Callable[[], object] | None = None) -> None:
+        """Help → Update yt-dlp…: check PyPI and install in the background."""
+        from sclm.gui.bridge import run_in_background
+
+        action = self._update_ytdlp_action
+        action.setEnabled(False)
+        paths = self._ctx.paths
+
+        def work() -> object:
+            if update_fn is not None:
+                return update_fn()
+            from sclm.download.updater import update
+
+            return update(paths)
+
+        def done(result: object) -> None:
+            action.setEnabled(True)
+            updated = bool(getattr(result, "updated", False))
+            version = getattr(result, "version", "?")
+            if updated:
+                QMessageBox.information(
+                    self, "yt-dlp updated",
+                    f"yt-dlp {version} was downloaded.\n"
+                    f"Restart {APP_DISPLAY_NAME} to start using it.")
+            else:
+                QMessageBox.information(
+                    self, "yt-dlp is up to date",
+                    f"You already have the latest yt-dlp ({version}).")
+
+        def failed(error: object) -> None:
+            action.setEnabled(True)
+            message = getattr(error, "user_message", None) or "Could not update yt-dlp."
+            QMessageBox.warning(self, "yt-dlp update failed", str(message))
+
+        run_in_background(work, done, failed, parent=self)
 
     def _show_about(self) -> None:
         QMessageBox.about(

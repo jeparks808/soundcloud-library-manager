@@ -59,4 +59,5 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | I2 | Accessibility / usability | 6 | partial | accessible names + shortcuts tested (test_main_controls_have_accessible_names) |
 | Q1 | Linux desktop launcher | 7 | partial | packaging/install.sh works (user-run). AppImage built + self-tested offscreen (packaging/build_appimage.sh); desktop placement pending |
 | Q3 | Clear startup failure when a Qt system lib is missing | 6 | done+tested | tests/core/test_platform_check.py (8); lead ran it against the real missing lib → message + exit 1 |
+| Q3b | yt-dlp self-update (AppImage stays usable when SoundCloud changes) | 6 | done+tested | download/updater.py; tests/download/test_updater.py (16), 2 GUI tests; real-PyPI no-op check by lead. Install path of a truly newer release untestable until one exists |
 | Q2 | No DRM/authorization bypass | all | done+tested | Go+ preview-only and DRM formats → AuthRequiredError (network test); cookies only pass the user's own login |

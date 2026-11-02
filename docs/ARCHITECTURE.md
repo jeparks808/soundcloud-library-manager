@@ -809,3 +809,15 @@ worker threads. Logs must not contain cookie contents.
   does not do fuzzy string matching.
 - Playlist membership reflects what yt-dlp returned. A truncated extraction can mark tracks
   as removed, and those marks clear on the next full sync.
+
+## 17. yt-dlp self-update (Help → Update yt-dlp…)
+
+`download/updater.py`. `update()` asks PyPI for the latest yt-dlp, and when it is newer than
+the active one, downloads the wheel, verifies its SHA-256 against PyPI's metadata and unpacks
+the `yt_dlp` package into `<data_dir>/yt-dlp-override/` (atomic swap; on any error the old
+state is kept). At the next start `app.main` calls `activate_override()` **before anything
+imports yt_dlp**: it prepends the override to `sys.path` only when the override is newer than
+the bundled copy (so a rebuilt app wins again), probe-imports it, and falls back to the
+bundled yt-dlp on any problem. This exists mainly for the frozen AppImage, which cannot be
+pip-upgraded; it works identically in a venv run. The GUI action runs `update()` through
+`run_in_background` and tells the user to restart.

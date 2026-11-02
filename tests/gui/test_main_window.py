@@ -134,3 +134,41 @@ def test_geometry_is_saved_on_close(qtbot, ctx):
     assert QSettings().value("window/geometry") is not None
     again = MainWindow(ctx)                 # restoring must not raise
     qtbot.addWidget(again)
+
+
+class _Result:
+    def __init__(self, updated, version):
+        self.updated, self.version, self.previous = updated, version, "2026.10.26"
+
+
+@pytest.mark.parametrize(
+    ("result", "title_part"),
+    [(_Result(True, "2027.01.01"), "updated"), (_Result(False, "2026.10.26"), "up to date")],
+)
+def test_update_ytdlp_action_reports_result(qtbot, ctx, monkeypatch, result, title_part):
+    win = MainWindow(ctx)
+    qtbot.addWidget(win)
+    shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(QMessageBox, "information",
+                        lambda _parent, title, text: shown.append((title, text)))
+    win._update_ytdlp(update_fn=lambda: result)
+    qtbot.waitUntil(lambda: bool(shown), timeout=4000)
+    assert title_part in shown[0][0]
+    assert result.version in shown[0][1]
+    assert win._update_ytdlp_action.isEnabled()
+
+
+def test_update_ytdlp_failure_shows_warning_and_reenables(qtbot, ctx, monkeypatch):
+    win = MainWindow(ctx)
+    qtbot.addWidget(win)
+    shown: list[tuple[str, str]] = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        lambda _parent, title, text: shown.append((title, text)))
+
+    def boom():
+        raise OSError("network down")
+
+    win._update_ytdlp(update_fn=boom)
+    qtbot.waitUntil(lambda: bool(shown), timeout=4000)
+    assert "failed" in shown[0][0]
+    assert win._update_ytdlp_action.isEnabled()

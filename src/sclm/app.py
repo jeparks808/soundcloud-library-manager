@@ -131,6 +131,15 @@ def main(argv: list[str] | None = None) -> int:
     install_excepthook()
     log.info("Starting sclm %s (log: %s)", __version__, log_file)
 
+    # Use a user-installed yt-dlp update when one is present and newer (Help → Update
+    # yt-dlp…). Must happen before anything imports yt_dlp; never fatal.
+    try:
+        from sclm.download.updater import activate_override
+
+        activate_override(paths)
+    except Exception:
+        log.exception("Could not activate the yt-dlp override; using the bundled version")
+
     try:
         core = build_core(paths)
     except Exception as exc:
