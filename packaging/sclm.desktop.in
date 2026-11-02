@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=SoundCloud Library Manager
+GenericName=Music Downloader
+Comment=Download authorized SoundCloud tracks to MP3 and organize your library
+Exec=@PYTHON@ -m sclm
+Icon=sclm
+Terminal=false
+Categories=AudioVideo;Audio;Qt;
+Keywords=soundcloud;mp3;music;playlist;
+StartupWMClass=sclm

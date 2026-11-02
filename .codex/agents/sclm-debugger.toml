@@ -1,0 +1,6 @@
+# Codex custom agent for stage: sclm-debugger (requested configuration; not verified in this environment)
+name = "sclm-debugger"
+description = "Stage 5 complex debugging"
+model = "gpt-6-astra"
+model_reasoning_effort = "xhigh"
+developer_instructions = "Read AGENTS.md and docs/ARCHITECTURE.md first. Stay within the module boundaries. Never bypass DRM or SoundCloud authorization. Never overwrite user files without explicit permission."

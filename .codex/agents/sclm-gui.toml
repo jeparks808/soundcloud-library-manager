@@ -1,0 +1,6 @@
+# Codex custom agent for stage: sclm-gui (requested configuration; not verified in this environment)
+name = "sclm-gui"
+description = "Stage 2 PySide6 GUI"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
+developer_instructions = "Read AGENTS.md and docs/ARCHITECTURE.md first. Stay within the module boundaries. Never bypass DRM or SoundCloud authorization. Never overwrite user files without explicit permission."

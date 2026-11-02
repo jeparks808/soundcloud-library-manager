@@ -1,0 +1,8 @@
+# Runtime dependencies, pinned to the versions tested on the target machine.
+# Lower bounds live in pyproject.toml. Update yt-dlp often: `pip install -U yt-dlp`.
+PySide6-Essentials==6.12.0
+yt-dlp==2026.10.26
+mutagen==1.48.1
+imageio-ffmpeg==0.7.0
+# Optional: Beets integration (Settings.beets_enabled). Install with: pip install -e ".[beets]"
+# beets==2.14.1

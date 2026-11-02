@@ -1,0 +1,6 @@
+# Codex custom agent for stage: sclm-downloader (requested configuration; not verified in this environment)
+name = "sclm-downloader"
+description = "Stage 3 yt-dlp downloader integration"
+model = "gpt-6-astra"
+model_reasoning_effort = "medium"
+developer_instructions = "Read AGENTS.md and docs/ARCHITECTURE.md first. Stay within the module boundaries. Never bypass DRM or SoundCloud authorization. Never overwrite user files without explicit permission."

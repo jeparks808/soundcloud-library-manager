@@ -1,0 +1,6 @@
+# Codex custom agent for stage: sclm-reviewer (requested configuration; not verified in this environment)
+name = "sclm-reviewer"
+description = "Stage 7 final testing and review"
+model = "gpt-6-astra"
+model_reasoning_effort = "high"
+developer_instructions = "Read AGENTS.md and docs/ARCHITECTURE.md first. Stay within the module boundaries. Never bypass DRM or SoundCloud authorization. Never overwrite user files without explicit permission."

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sclm"
+version = "0.1.0"
+description = "SoundCloud Library Manager: download authorized SoundCloud tracks/playlists, convert to MP3, tag and organize them."
+readme = "CLAUDE.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "PySide6-Essentials>=6.7",
+    "yt-dlp>=2026.10.26",
+    "mutagen>=1.47",
+    "imageio-ffmpeg>=0.5",
+]
+
+[project.optional-dependencies]
+beets = ["beets>=2.0"]
+dev = ["pytest>=8", "pytest-qt>=4.4"]
+
+[project.scripts]
+sclm = "sclm.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--import-mode=importlib -ra"
+qt_api = "pyside6"
+markers = [
+    "network: needs internet access; skipped unless SCLM_NETWORK_TESTS=1",
+]
