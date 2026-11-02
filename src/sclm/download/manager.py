@@ -13,7 +13,7 @@ from collections import deque
 from collections.abc import Callable, Iterable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import wait as wait_futures
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -45,10 +45,10 @@ from sclm.core.models import (
 )
 from sclm.core.paths import AppPaths
 from sclm.core.settings import CONCURRENCY_MAX, CONCURRENCY_MIN, Settings, SettingsStore
-from sclm.core.storage import Storage
+from sclm.core.storage import CLEAR, Storage
 from sclm.download.errors import classify_ytdlp_error
 from sclm.download.mapping import ensure_full_audio, merge_resolved, trackinfo_from_info
-from sclm.download.ytdlp_opts import download_opts, prepare_cookiefile
+from sclm.download.ytdlp_opts import build_download_ydl, download_opts, prepare_cookiefile
 
 log = logging.getLogger(__name__)
 
@@ -89,9 +89,7 @@ FfmpegResolver = Callable[[str | None], FfmpegInfo]
 
 
 def _default_ydl_factory(opts: dict[str, Any]) -> Any:
-    import yt_dlp
-
-    return yt_dlp.YoutubeDL(opts)  # type: ignore[arg-type]
+    return build_download_ydl(opts)
 
 
 def _rmtree(path: Path) -> None:
@@ -154,6 +152,11 @@ class _Entry:
     job: DownloadJob
     cancel: threading.Event
     last_progress: float = 0.0
+    # Serializes this job's state changes. Each change (apply -> persist -> emit -> publish)
+    # runs entirely under it, so the DB row and the listener see the same order as the
+    # in-memory state. Reentrant so a listener may call cancel()/retry() for the same job.
+    # Lock order: entry.order -> manager._lock (never the reverse while waiting).
+    order: threading.RLock = field(default_factory=threading.RLock)
 
 
 class DownloadManager:
@@ -168,7 +171,9 @@ class DownloadManager:
       -> TAGGING -> ORGANIZING -> COMPLETED | SKIPPED_DUPLICATE
       any step -> FAILED | CANCELLED;  NETWORK errors -> WAITING_RETRY -> RESOLVING ...
     Every transition is persisted with ``storage.update_download`` and announced with
-    ``listener.on_job_changed``. The manager is the ONLY writer of download-flow DB rows
+    ``listener.on_job_changed``, in the same order as it was applied (per-job ``order`` lock,
+    see ``_transition``); a terminal state becomes visible to ``get_job``/``jobs``/
+    ``is_idle`` only after both. The manager is the ONLY writer of download-flow DB rows
     (downloads, tracks, library_files for placed files).
 
     Keyword-only test seams (the app passes none of them): ``ydl_factory`` (default
@@ -242,56 +247,79 @@ class DownloadManager:
         quick DB insert per job); callable from the GUI thread.
         """
         bitrate = self._settings.get().bitrate_kbps
-        created: list[DownloadJob] = []
+        created: list[_Entry] = []
+        failure: BaseException | None = None
+        try:
+            with self._lock:
+                if self._closed:
+                    log.warning("enqueue() after shutdown ignored")
+                    return []
+                active = {e.job.track.track_id for e in self._entries.values()
+                          if not e.job.status.is_terminal}
+                for req in requests:
+                    track_id = req.track.track_id
+                    if track_id in active:
+                        log.info("Track %s already queued; ignoring duplicate request",
+                                 track_id)
+                        continue
+                    try:
+                        job_id = self._storage.create_download(
+                            req.track, playlist_id=req.playlist_id, bitrate_kbps=bitrate)
+                    except Exception as exc:    # schedule what was created, then report
+                        failure = exc
+                        break
+                    job = DownloadJob(job_id=job_id, track=req.track,
+                                      playlist_id=req.playlist_id,
+                                      playlist_title=req.playlist_title, force=req.force,
+                                      message=_STAGE_MESSAGES[JobStatus.QUEUED])
+                    entry = _Entry(job=job, cancel=threading.Event())
+                    # Hold the job's order lock until QUEUED is announced, so a cancel()
+                    # on another thread can't announce CANCELLED first. Uncontended: no
+                    # other thread can see the entry yet.
+                    entry.order.acquire()
+                    created.append(entry)
+                    self._entries[job_id] = entry
+                    active.add(track_id)
+            snapshots = [entry.job for entry in created]
+            for job in snapshots:
+                self._emit_job(job)
+        finally:
+            for entry in created:
+                entry.order.release()
         with self._lock:
-            if self._closed:
-                log.warning("enqueue() after shutdown ignored")
-                return []
-            active = {e.job.track.track_id for e in self._entries.values()
-                      if not e.job.status.is_terminal}
-            for req in requests:
-                track_id = req.track.track_id
-                if track_id in active:
-                    log.info("Track %s already queued; ignoring duplicate request", track_id)
-                    continue
-                job_id = self._storage.create_download(
-                    req.track, playlist_id=req.playlist_id, bitrate_kbps=bitrate)
-                job = DownloadJob(job_id=job_id, track=req.track, playlist_id=req.playlist_id,
-                                  playlist_title=req.playlist_title, force=req.force,
-                                  message=_STAGE_MESSAGES[JobStatus.QUEUED])
-                self._entries[job_id] = _Entry(job=job, cancel=threading.Event())
-                active.add(track_id)
-                created.append(job)
-        for job in created:
-            self._emit_job(job)
-        with self._lock:
-            for job in created:
-                entry = self._entries.get(job.job_id)
-                if entry is not None and entry.job.status == JobStatus.QUEUED:
-                    self._pending.append(job.job_id)
+            for entry in created:
+                if entry.job.status == JobStatus.QUEUED and not entry.cancel.is_set():
+                    self._pending.append(entry.job.job_id)
         self._dispatch()
-        return created
+        if failure is not None:
+            raise failure
+        return snapshots
 
     def cancel(self, job_id: int) -> bool:
         """Request cancellation. QUEUED jobs become CANCELLED immediately; running jobs stop
         at the next cooperative check (progress hook, between steps, backoff wait). Returns
-        False if the job is unknown or already terminal. Never blocks."""
+        False if the job is unknown or already terminal. Never blocks on a running job (a
+        QUEUED job may wait for its own in-flight QUEUED announcement)."""
         with self._lock:
             entry = self._entries.get(job_id)
             if entry is None or entry.job.status.is_terminal:
                 return False
             entry.cancel.set()
             if entry.job.status != JobStatus.QUEUED or job_id in self._running:
-                return True
-            try:
-                self._pending.remove(job_id)
-            except ValueError:
-                pass
-            entry.job = replace(entry.job, status=JobStatus.CANCELLED, fraction=None,
-                                message=_STAGE_MESSAGES[JobStatus.CANCELLED])
-            job = entry.job
-        self._persist(job, strict=False)
-        self._emit_job(job)
+                return True         # the worker that owns the job ends it as CANCELLED
+            event = entry.cancel
+        # Queued and owned by no worker: this call ends the job itself (serialized per job).
+        with entry.order:
+            with self._lock:
+                if self._entries.get(job_id) is not entry or entry.cancel is not event \
+                        or entry.job.status != JobStatus.QUEUED or job_id in self._running:
+                    return True     # a worker picked it up (and sees the event) or it moved on
+                try:
+                    self._pending.remove(job_id)
+                except ValueError:
+                    pass
+            self._transition(job_id, strict=False, status=JobStatus.CANCELLED, fraction=None,
+                             message=_STAGE_MESSAGES[JobStatus.CANCELLED])
         return True
 
     def cancel_all(self) -> int:
@@ -310,34 +338,45 @@ class DownloadManager:
         """
         with self._lock:
             entry = self._entries.get(job_id)
-            if self._closed or entry is None or not entry.job.status.is_terminal:
-                return None
-            track_id = entry.job.track.track_id
-            if any(e.job.track.track_id == track_id and not e.job.status.is_terminal
-                   for jid, e in self._entries.items() if jid != job_id):
-                log.info("Not retrying job %s: track %s is already queued", job_id, track_id)
-                return None
-            entry.cancel = threading.Event()
-            entry.last_progress = 0.0
-            entry.job = replace(entry.job, status=JobStatus.QUEUED, error=None, fraction=None,
-                                message=_STAGE_MESSAGES[JobStatus.QUEUED], final_path=None,
-                                duplicate_of=None, force=entry.job.force or force)
-            job = entry.job
-        self._persist(job, strict=False)
-        self._emit_job(job)
-        with self._lock:
-            entry = self._entries.get(job_id)
-            if entry is not None and entry.job.status == JobStatus.QUEUED \
-                    and job_id not in self._pending:
-                self._pending.append(job_id)
+        if entry is None:
+            return None
+        # Under the job's order lock: waits for an in-flight final transition, so the
+        # terminal state is persisted and announced before QUEUED is.
+        with entry.order:
+            with self._lock:
+                if self._closed or self._entries.get(job_id) is not entry \
+                        or not entry.job.status.is_terminal:
+                    return None
+                track_id = entry.job.track.track_id
+                if any(e.job.track.track_id == track_id and not e.job.status.is_terminal
+                       for jid, e in self._entries.items() if jid != job_id):
+                    log.info("Not retrying job %s: track %s is already queued", job_id,
+                             track_id)
+                    return None
+                entry.cancel = threading.Event()
+                entry.last_progress = 0.0
+                # Published at once: the job counts as queued for is_idle() and the
+                # enqueue() dedupe from here on.
+                entry.job = replace(entry.job, status=JobStatus.QUEUED, error=None,
+                                    fraction=None, message=_STAGE_MESSAGES[JobStatus.QUEUED],
+                                    final_path=None, duplicate_of=None,
+                                    force=entry.job.force or force)
+                job = entry.job
+            self._persist(job, strict=False)
+            self._emit_job(job)
+            with self._lock:
+                if entry.job is job and not entry.cancel.is_set() \
+                        and job_id not in self._pending:
+                    self._pending.append(job_id)
         self._dispatch()
         return job
 
     def clear_finished(self) -> list[int]:
         """Forget terminal jobs from the in-memory queue (DB history is kept). Returns their ids."""
         with self._lock:
-            ids = [jid for jid, e in self._entries.items()
-                   if e.job.status.is_terminal and jid not in self._running]
+            # A terminal state is published only after its final persist + emit, and the
+            # worker never touches the entry after that, so terminal jobs can always go.
+            ids = [jid for jid, e in self._entries.items() if e.job.status.is_terminal]
             for jid in ids:
                 del self._entries[jid]
         return ids
@@ -353,7 +392,8 @@ class DownloadManager:
             return entry.job if entry is not None else None
 
     def is_idle(self) -> bool:
-        """True when no job is QUEUED or active."""
+        """True when no job is QUEUED or active. Conservative: a job counts as finished only
+        once its final state has been persisted and announced."""
         with self._lock:
             return not any(e.job.status == JobStatus.QUEUED or e.job.status.is_active
                            for e in self._entries.values())
@@ -366,10 +406,15 @@ class DownloadManager:
             self._concurrency = self._clamp(workers)
         self._dispatch()
 
-    def shutdown(self, *, wait: bool = True, timeout: float | None = None) -> None:
+    def shutdown(self, *, wait: bool = True, timeout: float | None = None) -> bool:
         """Cancel all jobs and stop the pool. With ``wait``, block up to ``timeout`` seconds
         for workers to exit and staging dirs to be removed. Idempotent. Called by app.main
-        after the Qt event loop ends (never from a worker)."""
+        after the Qt event loop ends (never from a worker).
+
+        Returns True when no worker is running any more (every final state is persisted and
+        announced). False means a worker is still finishing (e.g. stuck in a network resolve
+        that cancellation can't interrupt); it will still write its final state, so the
+        caller must keep the storage open."""
         with self._lock:
             first = not self._closed
             self._closed = True
@@ -395,6 +440,7 @@ class DownloadManager:
             all_done = not self._running
         if wait and all_done:
             self._clean_stale_dirs()
+        return all_done
 
     # --- internals: scheduling --------------------------------------------------------
 
@@ -421,7 +467,8 @@ class DownloadManager:
             while self._pending:
                 job_id = self._pending.popleft()
                 entry = self._entries.get(job_id)
-                if entry is None or entry.job.status != JobStatus.QUEUED:
+                if entry is None or entry.job.status != JobStatus.QUEUED \
+                        or entry.cancel.is_set():   # cancel() is ending it right now
                     continue
                 if job_id in self._running or len(self._running) >= self._concurrency:
                     # still owned by a finishing worker (fast retry), or no free slot
@@ -471,10 +518,11 @@ class DownloadManager:
     def _persist(self, job: DownloadJob, *, strict: bool, bitrate_kbps: int | None = None
                  ) -> None:
         try:
+            # The row mirrors the job: no path on the job (e.g. after retry) -> NULL in the DB.
             self._storage.update_download(
                 job.job_id, status=job.status, attempts=job.attempts,
-                file_path=job.final_path or job.duplicate_of, bitrate_kbps=bitrate_kbps,
-                error=job.error)
+                file_path=job.final_path or job.duplicate_of or CLEAR,
+                bitrate_kbps=bitrate_kbps, error=job.error)
         except Exception:
             if strict:
                 raise
@@ -482,24 +530,46 @@ class DownloadManager:
 
     def _transition(self, job_id: int, *, persist: bool = True, strict: bool = True,
                     bitrate_kbps: int | None = None, **changes: Any) -> DownloadJob | None:
-        """Apply ``changes`` to the job, persist (status changes) and notify the listener."""
+        """Apply ``changes`` to the job, persist (status changes) and notify the listener.
+
+        Ordering (ARCHITECTURE.md §6): the whole step runs under the job's ``order`` lock, so
+        per job the in-memory state, the DB row and the listener see one sequence, whichever
+        thread makes the change. A non-terminal state is published to observers at once; a
+        terminal state only after it has been persisted and emitted, so ``get_job`` /
+        ``jobs`` / ``is_idle`` / ``clear_finished`` / ``retry`` never see a job as finished
+        before the DB and the listener do. Changes to a job that is already terminal are
+        dropped (only ``retry`` reopens one). Returns None if dropped or unknown.
+        """
         with self._lock:
             entry = self._entries.get(job_id)
-            if entry is None:
-                return None
-            entry.job = replace(entry.job, **changes)
-            job = entry.job
+        if entry is None:
+            return None
         failure: BaseException | None = None
-        if persist:
-            try:
-                self._persist(job, strict=True, bitrate_kbps=bitrate_kbps)
-            except Exception as exc:
-                if strict:
-                    failure = exc
-                else:
-                    log.exception("Could not record status %s for download %s",
-                                  job.status, job_id)
-        self._emit_job(job)
+        with entry.order:
+            with self._lock:
+                if self._entries.get(job_id) is not entry:
+                    return None
+                if entry.job.status.is_terminal:
+                    log.debug("Job %s is already %s; dropping change %s", job_id,
+                              entry.job.status, changes.get("status", "(no status)"))
+                    return None
+                job = replace(entry.job, **changes)
+                terminal = job.status.is_terminal
+                if not terminal:
+                    entry.job = job
+            if persist:
+                try:
+                    self._persist(job, strict=True, bitrate_kbps=bitrate_kbps)
+                except Exception as exc:
+                    if strict:
+                        failure = exc
+                    else:
+                        log.exception("Could not record status %s for download %s",
+                                      job.status, job_id)
+            self._emit_job(job)
+            if terminal:
+                with self._lock:
+                    entry.job = job
         if failure is not None:
             raise failure
         return job
@@ -551,6 +621,7 @@ class DownloadManager:
         staging = self._paths.job_staging_dir(job_id)
         final: dict[str, Any]
         attempt = 0
+        used: dict[str, Any] = {}              # what the current attempt ran with (ffmpeg)
         cancelled = {"status": JobStatus.CANCELLED, "fraction": None,
                      "message": _STAGE_MESSAGES[JobStatus.CANCELLED]}
         try:
@@ -561,11 +632,12 @@ class DownloadManager:
                     break
                 current = self.get_job(job_id)
                 assert current is not None
+                used.clear()
                 try:
                     self._transition(job_id, status=JobStatus.RESOLVING,
                                      attempts=current.attempts + 1, error=None, fraction=None,
                                      message=_STAGE_MESSAGES[JobStatus.RESOLVING])
-                    final = self._attempt(job_id, settings, staging, cancel)
+                    final = self._attempt(job_id, settings, staging, cancel, used)
                     break
                 except Exception as exc:
                     if cancel.is_set():
@@ -576,6 +648,10 @@ class DownloadManager:
                         final = dict(cancelled)
                         break
                     info = err.to_info()
+                    ffmpeg: FfmpegInfo | None = used.get("ffmpeg")
+                    if info.category == ErrorCategory.FFMPEG and ffmpeg is not None:
+                        info = replace(info, detail=f"{info.detail}\nFFmpeg used: "
+                                       f"{ffmpeg.path} (from {ffmpeg.source})".lstrip())
                     with self._lock:
                         closed = self._closed
                     if err.retryable and attempt < self._max_attempts and not closed:
@@ -608,14 +684,16 @@ class DownloadManager:
         self._transition(job_id, strict=False, bitrate_kbps=bitrate, **final)
 
     def _attempt(self, job_id: int, settings: Settings, staging: Path,
-                 cancel: threading.Event) -> dict[str, Any]:
+                 cancel: threading.Event, used: dict[str, Any]) -> dict[str, Any]:
         """One attempt: resolve -> duplicate pre-check -> download+convert -> finalize -> record.
 
-        Returns the terminal changes for the job; raises on failure.
+        Returns the terminal changes for the job; raises on failure. Records the ffmpeg it
+        uses in ``used["ffmpeg"]`` (FFMPEG errors name it in their detail).
         """
         job = self.get_job(job_id)
         assert job is not None
-        ffmpeg = self._ffmpeg_resolver(settings.ffmpeg_path_or_none).path
+        used["ffmpeg"] = self._ffmpeg_resolver(settings.ffmpeg_path_or_none)
+        ffmpeg = used["ffmpeg"].path
         _rmtree(staging)
         staging.mkdir(parents=True, exist_ok=True)
         cookiefile = prepare_cookiefile(settings, staging)

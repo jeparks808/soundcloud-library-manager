@@ -92,6 +92,10 @@ class QueueModel(QAbstractTableModel):
         self._events: dict[int, ProgressEvent] = {}      # last applied event per job (details)
         self._pending_jobs: dict[int, DownloadJob] = {}  # newest job snapshot per id
         self._pending_progress: dict[int, ProgressEvent] = {}
+        # Ids removed by "Clear finished". The manager announces a final state before it
+        # reports the job finished, so that event can still be queued when the job is
+        # cleared; it must not bring the row back (job ids are never reused).
+        self._forgotten: set[int] = set()
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(FLUSH_INTERVAL_MS)
@@ -159,6 +163,7 @@ class QueueModel(QAbstractTableModel):
         self.beginResetModel()
         self._jobs = list(jobs)
         self._row_of = {j.job_id: i for i, j in enumerate(self._jobs)}
+        self._forgotten.difference_update(self._row_of)
         self._events.clear()
         self._pending_jobs.clear()
         self._pending_progress.clear()
@@ -167,6 +172,7 @@ class QueueModel(QAbstractTableModel):
 
     def remove_jobs(self, job_ids: list[int]) -> None:
         gone = set(job_ids)
+        self._forgotten.update(gone)
         if not gone & self._row_of.keys():
             return
         self.beginResetModel()
@@ -202,6 +208,8 @@ class QueueModel(QAbstractTableModel):
 
     @Slot(object)
     def on_job_changed(self, job: DownloadJob) -> None:
+        if job.job_id in self._forgotten:       # late event for a cleared job
+            return
         self._pending_jobs[job.job_id] = job
         # A progress event older than this snapshot must not overwrite its fraction.
         self._pending_progress.pop(job.job_id, None)

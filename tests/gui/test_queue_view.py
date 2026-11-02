@@ -177,3 +177,24 @@ def test_completed_details_show_actual_bitrate(qtbot, ctx, make_job):
     view.model.set_jobs([low, full])
     assert view.model.index(0, COL_MESSAGE).data() == "a.mp3 · 128 kbps (original MP3 kept)"
     assert view.model.index(1, COL_MESSAGE).data() == "b.mp3 · 320 kbps"
+
+
+def test_cleared_job_does_not_come_back_from_a_late_event(qtbot, ctx, manager, make_job):
+    """Stage 5 race: the manager announces a job's final state (queued to the GUI thread)
+    before it reports the job as finished. If the user clicks "Clear finished" in between,
+    the manager forgets the job, and the late event must not re-add the row: the manager no
+    longer knows the job, so it could never be cleared again."""
+    view = QueueView(ctx)
+    qtbot.addWidget(view)
+    done = make_job(1, JobStatus.COMPLETED)
+    running = make_job(2, JobStatus.ORGANIZING)
+    manager._jobs = [done, running]
+    view.reload()
+    finished = manager._set(2, status=JobStatus.COMPLETED)   # manager: finished ...
+    view.clear_btn.click()                                    # ... user clears ...
+    assert view.model.rowCount() == 0
+    emit_from_worker(lambda: ctx.bridge.on_job_changed(finished))  # ... event arrives late
+    qtbot.wait(50)
+    view.model.flush()
+    assert view.model.rowCount() == 0
+    assert view.model.job(2) is None

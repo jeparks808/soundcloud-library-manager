@@ -9,7 +9,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+import signal
+import socket
 import sys
+import time
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from sclm import APP_DISPLAY_NAME, __version__
 from sclm.context import AppContext, CoreServices
@@ -17,6 +22,11 @@ from sclm.core.logging_setup import install_excepthook, setup_logging
 from sclm.core.paths import AppPaths
 from sclm.core.settings import SettingsStore
 from sclm.core.storage import Storage
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QApplication
+
+    from sclm.download.manager import DownloadManager
 
 log = logging.getLogger(__name__)
 
@@ -60,7 +70,58 @@ def _show_startup_error(message: str) -> None:
         pass
 
 
+def _route_signals_to_quit(app: QApplication) -> Callable[[], None]:
+    """Make SIGTERM (``kill``, session logout) and SIGINT (Ctrl+C) quit the event loop, so
+    the normal shutdown in :func:`main` runs instead of the process dying mid-download.
+
+    Python runs signal handlers only when the interpreter gets control, which it doesn't
+    while Qt's event loop sits in C++. ``signal.set_wakeup_fd`` makes the C-level handler
+    write a byte into a socketpair; a ``QSocketNotifier`` on the other end wakes the loop and
+    runs a Python slot, and the Python handler runs right then (no polling timer). The
+    handler posts ``quit`` with a zero timer, so a signal that arrives before ``exec()`` ends
+    the loop as soon as it starts. Main thread only. Returns a function that restores the
+    previous handlers (a second signal during shutdown then has its default effect).
+    """
+    from PySide6.QtCore import QSocketNotifier, QTimer
+
+    try:
+        rsock, wsock = socket.socketpair()
+        rsock.setblocking(False)
+        wsock.setblocking(False)
+        previous_fd = signal.set_wakeup_fd(wsock.fileno(), warn_on_full_buffer=False)
+    except (OSError, ValueError) as exc:
+        log.warning("Could not install signal handlers: %s", exc)
+        return lambda: None
+
+    def on_signal(signum: int, _frame: object) -> None:
+        log.info("Received %s; quitting", signal.Signals(signum).name)
+        QTimer.singleShot(0, app.quit)
+
+    previous = {sig: signal.signal(sig, on_signal) for sig in (signal.SIGTERM, signal.SIGINT)}
+    notifier = QSocketNotifier(rsock.fileno(), QSocketNotifier.Type.Read)
+
+    def drain() -> None:
+        try:
+            while rsock.recv(512):
+                pass
+        except OSError:
+            pass
+
+    notifier.activated.connect(drain)
+
+    def restore() -> None:
+        notifier.setEnabled(False)
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+        signal.set_wakeup_fd(previous_fd)
+        rsock.close()
+        wsock.close()
+
+    return restore
+
+
 def main(argv: list[str] | None = None) -> int:
+    started = time.monotonic()
     argv = list(sys.argv if argv is None else argv)
     args = _parse_args(argv[1:])
 
@@ -101,6 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception:
         log.exception("Could not apply the theme")
 
+    restore_signals = _route_signals_to_quit(app)
     manager = None
     try:
         from sclm.download.manager import DownloadManager
@@ -114,17 +176,46 @@ def main(argv: list[str] | None = None) -> int:
         window = MainWindow(ctx)
         window.show()
     except Exception as exc:
+        restore_signals()
         log.exception("Could not create the main window")
         _show_startup_error(f"SCLM could not start:\n{exc}\n\nSee the log: {log_file}")
-        core.storage.close()
+        if manager is not None:
+            _shutdown(manager, core.storage)
+        else:
+            core.storage.close()
         return 1
 
+    from PySide6.QtCore import QTimer
+
+    QTimer.singleShot(0, lambda: log.info("Ready (%.2f s after start)",
+                                          time.monotonic() - started))
     try:
         return int(app.exec())
     finally:
-        log.info("Shutting down")
-        try:
-            manager.shutdown(wait=True, timeout=SHUTDOWN_TIMEOUT_S)
-        except Exception:
-            log.exception("Download manager shutdown failed")
-        core.storage.close()
+        restore_signals()
+        # ``window`` and ``bridge`` stay referenced until main() returns, i.e. until after
+        # the manager has stopped and the listener is detached.
+        _shutdown(manager, core.storage)
+
+
+def _shutdown(manager: DownloadManager, storage: Storage) -> None:
+    """Stop downloads, then detach the GUI, then close the DB, in that order.
+
+    Runs after the event loop ended, while the window and the bridge still exist. The manager
+    goes first so every final state is persisted (and announced) before anything closes.
+    Then the listener is detached so a worker that is still finishing never emits into Qt
+    objects being torn down. The DB is closed only if no worker is left: a worker stuck in a
+    network resolve (cancellation can't interrupt it) still writes its final state, and
+    Python joins it at exit anyway.
+    """
+    log.info("Shutting down")
+    finished = False
+    try:
+        finished = manager.shutdown(wait=True, timeout=SHUTDOWN_TIMEOUT_S)
+    except Exception:
+        log.exception("Download manager shutdown failed")
+    manager.set_listener(None)
+    if finished:
+        storage.close()
+    else:
+        log.warning("A download is still stopping; leaving the database open until it ends")

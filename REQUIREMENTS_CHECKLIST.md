@@ -4,9 +4,9 @@ States: **done+tested** (automated test run and passed) · **done (untested)** �
 hand in the GUI only) · **partial** · **todo**. Updated by the lead engineer after each stage.
 
 "Offscreen" GUI tests are automated pytest-qt tests on `QT_QPA_PLATFORM=offscreen`. They are **not** manual
-verification. **No manual GUI verification on a real display has been done yet.**
+verification. Manual GUI verification so far (user, 2026-11-02): startup on the real display, playlist fetch/preview, downloads — "its working great!".
 
-Last test run (lead, 2026-11-02): `pytest -q` → **551 passed, 4 skipped** (but ~25% of repeated download+gui runs show 1 flaky failure, see R1); `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
+Last test run (lead, 2026-11-02, after Stage 5): `pytest -q` → **574 passed, 4 skipped**; download+gui repeated 30× → 0 failures; ordering tests 100× → 0 failures; `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
 lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_STATUS.md, Stage 2–4).
 
 | # | Requirement | Stage | State | Evidence |
@@ -45,18 +45,18 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | M7 | Optional Beets integration | 4 | done+tested | test_beets.py (real beets 2.14.1, tmp config; files untouched) |
 | M8 | Safe handling of missing/unreliable genre | 4 | done+tested | test_genre_titles.py |
 | M9 | Never overwrite user files without permission | 4 | done+tested | test_organizer (existing dest, EEXIST race, EXDEV, read-only); save_tags only on explicit Save |
-| R1 | Qt threading/signal handling | 5 | partial | bridge cross-thread tests pass. **Known race:** manager publishes in-memory state before the DB write + listener emit (flaky tests, possible out-of-order status). Assigned to Stage 5 |
-| R2 | Interrupted downloads | 5 | partial | cancel tests + staging cleanup + stale staging removed at startup; crash/kill mid-download not tested |
-| R3 | FFmpeg errors | 5 | partial | classification tests (test_errors); no test with a broken ffmpeg binary yet |
+| R1 | Qt threading/signal handling | 5 | done+tested | Per-job order lock in manager (tests/download/test_manager_ordering.py, 6 tests); bridge cross-thread tests; events after window destroyed (tests/gui/test_shutdown.py). 30×/100× loops clean |
+| R2 | Interrupted downloads | 5 | done+tested | Non-terminal rows reconciled as "Interrupted" at startup (test_crash_mid_download_is_reconciled_on_next_start); stale staging cleanup; SIGTERM/SIGINT run the normal shutdown (test_signal_runs_the_normal_shutdown) |
+| R3 | FFmpeg errors | 5 | done+tested | tests/download/test_ffmpeg_failures.py (broken binary, missing path, none anywhere, stderr tail kept; no retry, no partial files) |
 | R4 | Malformed filenames | 5 | done+tested | test_naming.py |
-| R5 | Unavailable tracks | 5 | done+tested | test_errors (unavailable/private/geo); network Go+ track → AUTH_REQUIRED |
+| R5 | Unavailable tracks | 5 | done+tested | test_errors (unavailable/private/geo); network Go+ track → AUTH_REQUIRED; removed-after-preview → test_tracks_removed_or_restricted_after_preview_fail_cleanly |
 | R6 | Missing metadata | 5 | done+tested | test_mapping missing fields; scanner filename fallback |
 | R7 | Duplicate files | 5 | done+tested | see M5/M9 |
 | R8 | Playlist changes | 5 | done+tested | preview sync added/removed tests |
-| R9 | Network interruptions | 5 | partial | retry/backoff tests with simulated errors; no real network-drop test |
-| R10 | Database consistency | 5 | partial | WAL, RLock, migrations tested. Open: stale `file_path` on retried rows; transition ordering race (see R1) |
+| R9 | Network interruptions | 5 | done+tested | Connection drop mid-download retries in a fresh staging dir; repeated drops fail without leaks (tests/download/test_reliability.py). Real network-drop not simulated at OS level |
+| R10 | Database consistency | 5 | done+tested | WAL, RLock, migrations; `file_path=CLEAR` sentinel fixes stale paths on retry; concurrency stress test with integrity_check (test_db_stays_consistent_with_workers_gui_reads_previews_and_scans_at_once) |
 | I1 | UI performance / resource use | 6 | partial | progress coalescing, model/view, paged queries; no measurements yet |
 | I2 | Accessibility / usability | 6 | partial | accessible names + shortcuts tested (test_main_controls_have_accessible_names) |
-| Q1 | Linux desktop launcher | 7 | partial | User ran packaging/install.sh successfully (launcher installed). Launching from it is blocked on the user's machine by missing libxcb-cursor0 (system lib) |
+| Q1 | Linux desktop launcher | 7 | partial | packaging/install.sh works (user-run). AppImage built + self-tested offscreen (packaging/build_appimage.sh); desktop placement pending |
 | Q3 | Clear startup failure when a Qt system lib is missing | 6 | done+tested | tests/core/test_platform_check.py (8); lead ran it against the real missing lib → message + exit 1 |
 | Q2 | No DRM/authorization bypass | all | done+tested | Go+ preview-only and DRM formats → AuthRequiredError (network test); cookies only pass the user's own login |

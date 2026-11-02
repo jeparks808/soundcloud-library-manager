@@ -19,9 +19,10 @@ import sqlite3
 import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from enum import Enum
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal
 
 from sclm.core.errors import ErrorCategory, ErrorInfo, StorageError
 from sclm.core.models import (
@@ -42,6 +43,15 @@ log = logging.getLogger(__name__)
 SCHEMA_VERSION = 1
 INTERRUPTED_MESSAGE = "Interrupted: the app was closed before this download finished."
 _CHUNK = 500
+
+
+class _Clear(Enum):
+    CLEAR = "clear"
+
+
+CLEAR = _Clear.CLEAR
+"""Sentinel for :meth:`Storage.update_download`: ``file_path=CLEAR`` sets the stored path to
+NULL (``None`` keeps the stored value)."""
 
 MIGRATIONS: dict[int, str] = {
     1: """
@@ -393,11 +403,13 @@ class Storage:
             return int(cur.lastrowid)
 
     def update_download(self, download_id: int, *, status: JobStatus,
-                        attempts: int | None = None, file_path: Path | None = None,
+                        attempts: int | None = None,
+                        file_path: Path | Literal[_Clear.CLEAR] | None = None,
                         bitrate_kbps: int | None = None,
                         error: ErrorInfo | None = None) -> None:
-        """Set status (and optionally attempts/file_path/bitrate). ``error`` replaces the stored
-        error (None clears it). ``completed_at`` is set when status becomes COMPLETED."""
+        """Set status (and optionally attempts/file_path/bitrate). ``file_path=None`` keeps the
+        stored path, :data:`CLEAR` sets it to NULL. ``error`` replaces the stored error (None
+        clears it). ``completed_at`` is set when status becomes COMPLETED."""
         now = utc_now_iso()
         sets = ["status = ?", "updated_at = ?",
                 "error_category = ?", "error_message = ?", "error_detail = ?"]
@@ -408,7 +420,9 @@ class Storage:
         if attempts is not None:
             sets.append("attempts = ?")
             params.append(attempts)
-        if file_path is not None:
+        if file_path is CLEAR:
+            sets.append("file_path = NULL")
+        elif file_path is not None:
             sets.append("file_path = ?")
             params.append(str(file_path))
         if bitrate_kbps is not None:

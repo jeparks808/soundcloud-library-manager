@@ -198,9 +198,31 @@ Rules:
   `DownloadManager` never holds its internal lock while calling the listener and catches and
   logs any listener exception. A job's events come from the thread that currently owns the
   job. `cancel()` on a QUEUED job emits from the caller's thread.
+- **Per-job ordering (Stage 5).** Every state change of a job runs as one step under that
+  job's own reentrant lock (`_Entry.order`): apply → `update_download` → `on_job_changed` →
+  publish. So, per job, the in-memory state, the `downloads` row and the listener see the same
+  sequence, whichever thread makes the change (worker, `cancel()`, `retry()`, `enqueue()`,
+  `shutdown()`). Rules that follow from it:
+  - A **terminal** state is published to `get_job` / `jobs` / `is_idle` / `clear_finished` /
+    `retry` only after it has been persisted and announced. A non-terminal state is
+    published at once, so `is_idle()` can say "busy" a moment early but never "idle" early.
+    The concurrency slot is freed after that, when the worker returns.
+  - A change to a job that is already terminal is dropped; only `retry()` reopens one.
+  - `retry()` on a job whose final step is still running waits for it, then re-queues.
+    `cancel()` on a running job never waits (it only sets the event).
+  - Lock order is `_Entry.order` → manager lock → `Storage` lock; the manager lock is never
+    held while waiting for an `order` lock or calling the listener. The listener is called
+    while that job's `order` lock is held. That is deadlock-free for the bridge, whose
+    methods only emit Qt signals. A listener may call back into the manager for the *same*
+    job (reentrant), but must not synchronously `cancel`/`retry`/`enqueue` *other* jobs from
+    a worker thread.
 - **Progress after termination.** An `on_progress` call can arrive after the terminal
   `on_job_changed` because of a thread race. Receivers ignore progress for jobs whose last
   known status is terminal.
+- **Late events after "Clear finished".** The terminal event is queued to the GUI thread
+  before the manager reports the job as finished, so `clear_finished()` can return a job
+  whose event is still in the Qt queue. `QueueModel` ignores events for ids it has cleared
+  (ids are never reused), so a cleared row never comes back.
 - **Cooperative cancellation.** Each job has a `threading.Event`:
   - The yt-dlp progress hook checks it and raises `core.errors.JobCancelled`.
   - The worker also checks it between steps, and backoff waits use `event.wait(delay)`.
@@ -208,9 +230,23 @@ Rules:
     in a job, if the job's cancel event is set, the job is CANCELLED.
   - Cancellation can lag by up to the socket timeout (20 s) while resolving, or by the
     length of one ffmpeg conversion (a few seconds), because no hook runs during those steps.
+- **Signals.** `app.main` routes SIGTERM (`kill`, session logout) and SIGINT (Ctrl+C) to
+  `QApplication.quit()`, so they take the normal shutdown path below (exit code 0). The
+  wakeup uses `signal.set_wakeup_fd` + a socketpair + `QSocketNotifier` (no polling timer).
+  The handlers are restored when the loop ends, so a second signal during shutdown has its
+  default effect.
 - **Shutdown.** When the event loop ends, `app.main` calls `manager.shutdown(wait=True,
-  timeout=15)`, which cancels all jobs and joins the workers. The main window asks for
+  timeout=15)`, which cancels all jobs and joins the workers, while the window and bridge
+  still exist. Then it detaches the listener (`set_listener(None)`), so a worker that is still
+  finishing can't emit into Qt objects being torn down. It closes the DB only if `shutdown`
+  returned True (no worker left). A worker stuck in a resolve outlives the timeout. It still
+  records its final CANCELLED, and Python joins it at exit. The main window asks for
   confirmation before closing while `not manager.is_idle()`.
+- **Crash recovery.** A killed process leaves `downloads` rows non-terminal and a
+  `staging/job-<id>` dir behind. On the next start `build_core` marks those rows FAILED
+  ("Interrupted") and the manager removes stale staging dirs. Partial downloads only ever
+  exist in staging, never in the library. The tracks count as new again, so the preview
+  offers them for download.
 
 ### Bridge contract (Qt side)
 
@@ -243,7 +279,7 @@ exception: `OSError` becomes FILESYSTEM, anything unrecognized becomes UNKNOWN.
 | `private` | `PrivateTrackError` | no | "private", 403 on a private set |
 | `auth_required` | `AuthRequiredError` | no | "sign in", "login required", "Go+", only preview formats |
 | `network` | `NetworkError` | **yes** | `URLError`, timeouts, connection reset, DNS failure, HTTP 429/5xx, `TransportError` |
-| `ffmpeg` | `FFmpegError` / `FFmpegNotFoundError` | no | yt-dlp `PostProcessingError`; `detail` holds the last 15 stderr lines |
+| `ffmpeg` | `FFmpegError` / `FFmpegNotFoundError` | no | yt-dlp `PostProcessingError`; `detail` holds the last 15 stderr lines (kept by `ytdlp_opts.build_download_ydl`, §13) plus "FFmpeg used: <path> (from settings\|path\|bundled)" |
 | `filesystem` | `FileSystemError` | no | ENOSPC, EACCES, bad library path, tag write failure |
 | `cancelled` | `JobCancelled` | no | user cancel, shutdown |
 | `invalid_url` | `InvalidUrlError` | no | not a SoundCloud URL (checked before any network access) |
@@ -255,8 +291,10 @@ exception: `OSError` becomes FILESYSTEM, anything unrecognized becomes UNKNOWN.
 `NETWORK_BACKOFF_BASE_S * 2**(n-1)`, which gives 2 s and then 4 s. While waiting, the job is
 WAITING_RETRY, `error` is set, and `message` reads like "Retrying in 4 s (attempt 3 of 3)".
 Each attempt restarts at RESOLVING in a fresh staging dir. yt-dlp's own `retries=3` handles
-HTTP-level retries inside one attempt. A manual `retry()` resets nothing except the status
-and is always allowed for terminal jobs. Previews are never retried automatically.
+HTTP-level retries inside one attempt. A manual `retry()` keeps the job id, DB row and
+attempt count, clears the error and the stored path (`downloads.file_path` → NULL until the
+new run records one), and is always allowed for terminal jobs. Previews are never retried
+automatically.
 
 **Messages.** `user_message` is short, plain and has no traceback. `detail` holds the
 technical text and appears behind a "Details" expander and in the log. Every FAILED job is
@@ -425,7 +463,8 @@ class Storage:
     def create_download(self, track: TrackInfo, *, playlist_id: str | None = None,
                         bitrate_kbps: int | None = None) -> int     # upserts track; QUEUED
     def update_download(self, download_id: int, *, status: JobStatus,
-                        attempts: int | None = None, file_path: Path | None = None,
+                        attempts: int | None = None,
+                        file_path: Path | Literal[CLEAR] | None = None,  # None keeps, CLEAR -> NULL
                         bitrate_kbps: int | None = None, error: ErrorInfo | None = None) -> None
     def get_download(self, download_id: int) -> DownloadRecord | None
     def download_history(self, *, limit: int = 200, offset: int = 0,
@@ -484,7 +523,7 @@ class DownloadManager:
     def get_job(self, job_id: int) -> DownloadJob | None
     def is_idle(self) -> bool
     def set_concurrency(self, workers: int) -> None
-    def shutdown(self, *, wait: bool = True, timeout: float | None = None) -> None
+    def shutdown(self, *, wait: bool = True, timeout: float | None = None) -> bool  # True: no worker left
 ```
 
 The stub docstrings in `src/sclm/download/*.py` describe each method's semantics in detail.
@@ -681,6 +720,12 @@ Notes:
   is not fetched twice.
 - **Offline tests** can download a local file through the real pipeline with
   `"enable_file_urls": True` and a `file://` URL. Do not enable this outside tests.
+- **FFmpeg stderr (Stage 5).** yt-dlp puts only the last ffmpeg stderr line into its error.
+  The manager's default factory, `ytdlp_opts.build_download_ydl(opts)`, creates the
+  `YoutubeDL` and adds FFmpegExtractAudio itself (`ydl.add_post_processor`) as a small
+  subclass that appends the last `FFMPEG_STDERR_TAIL_LINES` stderr lines to the error. It
+  keeps the same `pp_key` ("ExtractAudio"), so hooks and logs are unchanged. `download_opts`
+  still lists the postprocessor; fake factories in tests can ignore it.
 
 ## 14. Logging
 
@@ -756,7 +801,8 @@ worker threads. Logs must not contain cookie contents.
 - `conflict_policy = ask` behaves like `skip`. The "Keep both" action re-downloads the track.
 - There is no pause/resume. Cancel and Retry restart the job from scratch.
 - Cancellation can lag during network resolve (up to the 20 s socket timeout) and during an
-  ffmpeg conversion.
+  ffmpeg conversion. Quitting during such a resolve closes the window at once, but the
+  process exits only when the stalled read returns.
 - Sign-in is only possible through a user-supplied cookies file. There is no OAuth or login
   UI.
 - Artist/title duplicate detection is exact on the normalized key with ±2 s on duration. It

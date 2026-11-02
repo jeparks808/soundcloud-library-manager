@@ -129,3 +129,31 @@ The lead confirmed it's gone.
   (`test_clear_finished_and_jobs` or `test_e2e_offline` status-sequence). Cause: `DownloadManager._transition` updates the in-memory
   job under the lock, then persists to the DB and emits to the listener after releasing it. Observers see the new state before the
   DB or listener do. Concurrent transitions on one job could also persist or emit out of order. Assigned to Stage 5 (debugger, opus/xhigh).
+
+### Stage 5: Debugging and reliability ✅ (2026-11-02)
+- **Ran as:** `general-purpose` subagent, `model=opus`, `effort=xhigh`, instructions from `sclm-debugger.md`.
+  **Limitation:** the agent hit the 5-hour Opus usage limit during final verification and was terminated. Its fixes and
+  tests were complete and on disk; the **lead session (by then running on Fable 5) finished the verification** and wrote
+  this entry. Per orchestration rule 8, this deviation is reported rather than silently absorbed.
+- **Priority 1 (transition-ordering race):** fixed with a per-job `order` lock in `download/manager.py`: per job, in-memory
+  state = DB writes = listener emissions in one sequence; terminal states become visible to `get_job`/`jobs`/`is_idle` only
+  after their final persist + emit; stale writes can never overwrite a terminal state; listener still never called under the
+  manager lock. ARCHITECTURE §6 updated. New tests: tests/download/test_manager_ordering.py (6).
+- **Priority 2:** crash reconciliation at startup ("Interrupted" rows, retryable), ffmpeg failure handling with stderr tail
+  (custom FFmpegExtractAudioPP subclass in ytdlp_opts.py), network-drop retry in fresh staging with no leaks, removed/restricted
+  tracks fail cleanly, DB concurrency stress with integrity_check, bridge events after window destruction, shutdown order
+  (manager before storage/widgets), SIGTERM/SIGINT graceful shutdown via socketpair + QSocketNotifier (found by the packaging
+  agent). `Storage.update_download(file_path=CLEAR)` sentinel resolves issue #2.
+- **Validation (lead, Fable 5):** full suite **574 passed, 4 skipped**; `tests/download tests/gui` 30× in a loop → **0 failures**
+  (about 25% of runs failed before the fix); test_manager_ordering.py 100× → **0 failures**. Issues #2 and #8 closed; #3 (cancel
+  lag) remains documented v1 behavior.
+
+### Packaging: standalone AppImage ✅ (2026-11-02)
+- **Ran as:** `general-purpose` subagent, `model=opus`, `effort=high` (packaging task, outside the seven stages).
+- `packaging/build_appimage.sh` → `dist/SoundCloud_Library_Manager-0.1.0-x86_64.AppImage` (76 MB, ~2 min build, pinned
+  appimagetool + runtime with SHA-256 checks, lean Qt, bundled libxcb-cursor + certifi + imageio-ffmpeg fallback; same XDG
+  data dirs as the venv app). Includes a hidden `--self-test`.
+- **Validation (lead):** `--version` OK; `--self-test --network` **11/11 PASS** (Qt, ffmpeg encode, HTTPS, real SoundCloud
+  preview). Agent additionally verified it works with the system libxcb-cursor hidden. Not yet verified: real-display window,
+  double-click launch, Wayland (plugin not bundled). glibc ≥ 2.38 required. Frozen yt-dlp goes stale → updater planned.
+- **User decision:** AppImage goes on the Desktop, after all Stage 5 fixes are in.

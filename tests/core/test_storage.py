@@ -14,7 +14,7 @@ from sclm.core.models import (
     PlaylistInfo,
     TrackInfo,
 )
-from sclm.core.storage import INTERRUPTED_MESSAGE, SCHEMA_VERSION, Storage
+from sclm.core.storage import CLEAR, INTERRUPTED_MESSAGE, SCHEMA_VERSION, Storage
 
 
 def _playlist(make_track, ids, pid="pl1", title="My Set"):
@@ -180,6 +180,21 @@ def test_download_lifecycle_and_history(storage, make_track, tmp_path):
     assert [r.id for r in storage.download_history(statuses=[JobStatus.FAILED])] == [other]
     assert storage.download_history(statuses=[]) == []
     assert [r.id for r in storage.download_history(limit=1, offset=1)] == [job_id]
+
+
+def test_update_download_file_path_none_keeps_and_clear_sets_null(storage, make_track,
+                                                                  tmp_path):
+    """Issue #2: a retried job must be able to drop its old path. ``None`` keeps the stored
+    value (backwards compatible), ``CLEAR`` sets it to NULL."""
+    job = storage.create_download(make_track("1"))
+    f = tmp_path / "x.mp3"
+    storage.update_download(job, status=JobStatus.SKIPPED_DUPLICATE, file_path=f)
+    storage.update_download(job, status=JobStatus.FAILED)
+    assert storage.get_download(job).file_path == f
+    storage.update_download(job, status=JobStatus.QUEUED, file_path=CLEAR)
+    assert storage.get_download(job).file_path is None
+    storage.update_download(job, status=JobStatus.COMPLETED, file_path=f)
+    assert storage.get_download(job).file_path == f
 
 
 def test_update_unknown_download_raises(storage):

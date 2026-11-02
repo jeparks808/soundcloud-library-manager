@@ -409,6 +409,26 @@ def test_duplicate_precheck_skips_then_keep_both(run_one, make_track, fake_find_
     assert existing.read_bytes() == b"x"
 
 
+def test_retry_clears_the_stored_file_path(run_one, make_track, fake_find_duplicate, fake_ydl,
+                                           storage, library_dir, wait_until):
+    """Issue #2: a SKIPPED_DUPLICATE row stores the duplicate's path; once the job is retried
+    (and here fails), the row must not keep pointing at that file."""
+    existing = library_dir / "existing.mp3"
+    existing.write_bytes(b"x")
+    fake_find_duplicate.matches["1"] = DuplicateMatch(DuplicateReason.ARTIST_TITLE, existing,
+                                                      None)
+    track = make_track("1")
+    m, job = run_one(track)
+    assert storage.get_download(job.job_id).file_path == existing
+    fake_ydl.scripts[track.url].extract_errors.append(
+        DownloadError("ERROR: [soundcloud] x: HTTP Error 404: Not Found"))
+    assert m.retry(job.job_id, force=True) is not None
+    wait_until(lambda: terminal(m, job.job_id))
+    assert m.get_job(job.job_id).status == S.FAILED
+    rec = storage.get_download(job.job_id)
+    assert rec.status == S.FAILED and rec.file_path is None
+
+
 def test_force_request_skips_precheck(run_one, make_track, fake_find_duplicate, library_dir):
     fake_find_duplicate.matches["1"] = DuplicateMatch(DuplicateReason.TRACK_ID,
                                                       library_dir / "x.mp3", "1")
