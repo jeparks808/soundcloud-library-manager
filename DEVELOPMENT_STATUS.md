@@ -166,3 +166,11 @@ The lead confirmed it's gone.
 - **Validation:** full suite **592 passed, 4 skipped**; 16 updater tests + 2 GUI tests; real-PyPI run in a throwaway home →
   correct "already up to date" no-op (venv has the current latest). The real-install path can only be exercised once a newer
   release than the bundled one exists.
+
+### Final AppImage + desktop placement (2026-11-02, lead on Fable 5)
+- Rebuilt with all Stage 5 fixes + the yt-dlp updater: `dist/SoundCloud_Library_Manager-0.1.0-x86_64.AppImage` (76 MB, 52 s build).
+- **Verified (lead):** `--version`; `--self-test --network` all PASS (incl. real SoundCloud preview); SIGTERM to the frozen app →
+  "Received SIGTERM; quitting" / "Shutting down", exit 0.
+- **Placed:** copied to `~/Desktop/SoundCloud_Library_Manager.AppImage` (chmod +x, gio trusted; nothing was overwritten — the name
+  was free). Mint menu entry `~/.local/share/applications/sclm.desktop` now launches the AppImage (was: venv python).
+- **Pending user verification:** double-click launch from the Desktop and the menu on the real display.
