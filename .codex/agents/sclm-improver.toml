@@ -1,0 +1,6 @@
+# Codex custom agent for stage: sclm-improver (requested configuration; not verified in this environment)
+name = "sclm-improver"
+description = "Stage 6 minor improvements"
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+developer_instructions = "Read AGENTS.md and docs/ARCHITECTURE.md first. Stay within the module boundaries. Never bypass DRM or SoundCloud authorization. Never overwrite user files without explicit permission."

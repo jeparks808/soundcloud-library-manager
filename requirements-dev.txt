@@ -1,0 +1,4 @@
+-r requirements.txt
+beets==2.14.1
+pytest==9.2.0
+pytest-qt==4.5.0
