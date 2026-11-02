@@ -1,0 +1,5 @@
+#!/bin/sh
+# AppImage entry point: start the PyInstaller onedir build of SoundCloud Library Manager.
+# The AppImage runtime sets $APPDIR to the mounted image; fall back to this script's dir.
+HERE="${APPDIR:-$(dirname "$(readlink -f "$0")")}"
+exec "$HERE/usr/lib/sclm/sclm" "$@"

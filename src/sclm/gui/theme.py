@@ -6,6 +6,7 @@ painting (progress bars, status text) matches the stylesheet.
 
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
 
@@ -210,9 +211,19 @@ def apply_theme(app: QApplication) -> None:
 
 
 def icon_path() -> Path | None:
-    """``packaging/sclm.svg`` if it exists next to the source tree (dev / editable install)."""
-    for base in (Path(__file__).resolve().parents[3], Path.cwd()):
-        candidate = base / "packaging" / "sclm.svg"
+    """The application SVG icon, or None.
+
+    Frozen builds (PyInstaller/AppImage) ship it as ``sclm/resources/sclm.svg`` inside the
+    bundle (``sys._MEIPASS``); dev / editable installs use ``packaging/sclm.svg`` next to the
+    source tree.
+    """
+    here = Path(__file__).resolve()
+    candidates = [here.parents[1] / "resources" / "sclm.svg"]
+    bundle = getattr(sys, "_MEIPASS", None)
+    if bundle:
+        candidates.append(Path(bundle) / "sclm" / "resources" / "sclm.svg")
+    candidates += [base / "packaging" / "sclm.svg" for base in (here.parents[3], Path.cwd())]
+    for candidate in candidates:
         if candidate.is_file():
             return candidate
     return None
