@@ -80,10 +80,21 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance() or QApplication(argv)
-    app.setApplicationName(APP_DISPLAY_NAME)
+    # The launcher uses StartupWMClass=sclm, so the Qt application name must be "sclm".
+    app.setApplicationName("sclm")
+    app.setApplicationDisplayName(APP_DISPLAY_NAME)
     app.setApplicationVersion(__version__)
     app.setOrganizationName("sclm")
     app.setDesktopFileName("sclm")
+    try:
+        from sclm.gui.theme import app_icon, apply_theme
+
+        apply_theme(app)
+        icon = app_icon()
+        if not icon.isNull():
+            app.setWindowIcon(icon)
+    except Exception:
+        log.exception("Could not apply the theme")
 
     manager = None
     try:

@@ -65,3 +65,35 @@ local Codex default model is `gpt-6.1-terra`. Whether those model names are avai
 - **Lead decisions:** accepted ≤500-row paged SQLite reads on the GUI thread. Kept `cookies_file`, which carries only the user's own
   authorization and bypasses nothing. In v1 the "ask" conflict policy resolves to skip, with a "Keep both" action in the queue.
 - **Packaging (lead):** `packaging/install.sh`, `sclm.desktop.in`, `sclm.svg`.
+
+### Stages 2–4: GUI, Downloader, Metadata ✅ first working version (2026-11-02)
+These ran concurrently because their file ownership doesn't overlap (gui/, download/, metadata/, plus each one's tests/ dir).
+| Stage | Ran as | Agent tests reported |
+|---|---|---|
+| 2 GUI | `general-purpose`, `model=sonnet`, `effort=high`, instructions from `sclm-gui.md` | tests/gui 53 passed |
+| 3 Downloader | `general-purpose`, `model=opus`, `effort=high`, instructions from `sclm-downloader.md` | tests/download 112 passed + 4 network passed |
+| 4 Metadata | `general-purpose`, `model=opus`, `effort=high`, instructions from `sclm-metadata.md` | tests/metadata 243 passed |
+
+**Lead verification:**
+- `pytest -q` → **520 passed, 4 skipped** (15.9 s). `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed** (9.9 s).
+- Offscreen app launch: window shown in 0.41 s, closes and shuts down cleanly (exit 0).
+- Real end-to-end (scratch script, not in repo): preview of a public SoundCloud test track (2.6 s) → DownloadManager →
+  real `finalize_track` → `Library/Singles/…mp3` (ID3v2.3: TIT2, TPE1, TPE2, TCON, TDRC, COMM, WOAS, TXXX:SOUNDCLOUD_TRACK_ID,
+  APIC). A second enqueue → `skipped_duplicate`. Both outcomes are in the history.
+- Reviewed the offscreen screenshots at 1440×900 (Download, Queue, Settings).
+- **Not done:** manual GUI use on a real display; a multi-track network download.
+
+**Side effect reported by the metadata agent:** it briefly created an empty `~/.config/beets` and removed it with `rmdir`.
+The lead confirmed it's gone.
+
+### Outstanding issues
+1. **Bitrate ignored for MP3 sources (D6).** yt-dlp's FFmpegExtractAudio copies a source that's already MP3, so a 192 kbps
+   setting produced a 128 kbps file. Plan for Stage 5: record the actual bitrate, show it in the UI, and add an explicit
+   "always re-encode to the chosen bitrate" option. The default to be decided; copying avoids a lossy re-encode.
+2. `downloads.file_path` isn't cleared when a job is retried, because `Storage.update_download` can't set NULL. A stale value
+   can remain on failed rows (not user-visible today).
+3. Cancellation can't interrupt an in-flight network resolve (≤20 s socket timeout) or a running ffmpeg conversion (documented v1).
+4. Template tidying can strip trailing punctuation such as "..." from titles.
+5. On filesystems without hard links, a process crash during the exclusive-create copy can leave a partial file.
+6. docs/ARCHITECTURE.md should be updated with the agents' documented deviations (test seams, the title→artist heuristic,
+   namespaced user-list playlist ids, the cookies copy, the non-hardlink fallback).

@@ -10,4 +10,7 @@ Public API (see docs/ARCHITECTURE.md):
   sclm.metadata.naming.sanitize_component
   sclm.metadata.genre.normalize_genre
   sclm.metadata.editor.read_tags / save_tags (GUI metadata editor, via run_in_background)
+
+Internals: tagger (Mutagen ID3v2.3), artwork (urllib fetch), organizer (layout +
+no-overwrite placement), titles ("Artist - Title" parsing), beets_bridge (optional Beets).
 """
