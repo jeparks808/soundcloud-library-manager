@@ -43,6 +43,11 @@ PREVIEW_ONLY_MESSAGE = ("Only a 30-second preview of this track is available (So
 _GEO = re.compile(r"geo[ -]?restrict|not available (?:from|in) your (?:location|country)"
                   r"|not available in your region|blocked in your country", re.I)
 _DRM = re.compile(r"\bdrm\b", re.I)
+# YouTube's anti-bot check after too many requests from one connection (Alternatives page).
+# It is temporary; SCLM waits it out and never tries to get around it.
+_BOT_CHECK = re.compile(r"confirm you.re not a bot", re.I)
+RATE_LIMITED_MESSAGE = ("YouTube is limiting requests from your connection (too many in a "
+                        "short time). Wait a while, then try again.")
 _PRIVATE = re.compile(r"\bprivate\b", re.I)
 _AUTH = re.compile(r"sign[ -]?in|log[ -]?in\b|login|registered users|go\+|subscription"
                    r"|authenticat|unauthori[sz]ed|premium|--cookies", re.I)
@@ -169,6 +174,8 @@ def classify_ytdlp_error(exc: BaseException) -> SclmError:
         return GeoBlockedError(detail=detail)
     if _DRM.search(text):
         return DrmProtectedError(detail=detail)
+    if _BOT_CHECK.search(text):          # before the generic "sign in" → auth_required
+        return NetworkError(RATE_LIMITED_MESSAGE, detail=detail)
 
     for e in chain:
         status = _http_status(e)

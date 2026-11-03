@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import threading
+from pathlib import Path
 from dataclasses import replace
 
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
 from sclm.core.errors import ErrorCategory, ErrorInfo
-from sclm.core.models import JobStatus
+from sclm.core.models import JobStatus, ProgressEvent
 from sclm.download.alternatives import (
     Availability,
     Candidate,
@@ -63,10 +64,12 @@ class Fakes:
 
 @pytest.fixture
 def failed(make_track):
-    def make(track_id="109665566", title="9k Freestyle"):
+    def make(track_id="109665566", title="9k Freestyle", playlist="Watah"):
         track = make_track(track_id, title=title, artist="Chris Travis", duration_s=132.7)
         return FailedTrack(track=track, error=ErrorInfo(ErrorCategory.DRM_PROTECTED,
-                                                        "DRM-protected", "d"), download_id=1)
+                                                        "DRM-protected", "d"), download_id=1,
+                           playlist_id=f"pl-{playlist}" if playlist else None,
+                           playlist_title=playlist)
     return make
 
 
@@ -139,11 +142,64 @@ def test_confirmed_download_enqueues_the_youtube_source(qtbot, ctx, failed, monk
     view.download_btn.click()
     [(_, [request])] = ctx.manager.calls
     assert request.track is item.track and request.audio_source_url == OK_URL
+    assert (request.playlist_id, request.playlist_title) == ("pl-Watah", "Watah")
     assert "lossy" in texts[0] and "allowed" in texts[0]
+    library = Path(ctx.settings.get().library_path)
+    assert f"Saves to: {library / 'Watah'}" in texts[0]       # the playlist's folder
     assert not view.download_btn.isEnabled()                # queued: no second job
     [job] = ctx.manager.jobs()
     ctx.bridge.job_changed.emit(replace(job, status=JobStatus.FAILED))
     assert view.download_btn.isEnabled()                    # finished: may try another
+
+
+def test_progress_of_the_chosen_video_is_shown(qtbot, ctx, failed, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question",
+                        lambda *a, **k: QMessageBox.StandardButton.Yes)
+    messages = []
+    view = _view(qtbot, ctx, Fakes([failed()]))
+    view.message.connect(messages.append)
+    view.show()
+    qtbot.waitUntil(lambda: _all_checked(view))
+    assert not view.progress.isVisible()
+    view.candidate_table.selectRow(_row_for(view, OK_URL))
+    view.download_btn.click()
+    [job] = ctx.manager.jobs()
+    assert view.progress.isVisible() and view.progress.value() == 0
+    assert "Queued" in view.progress_label.text()
+    ctx.bridge.progress.emit(ProgressEvent(job.job_id, JobStatus.DOWNLOADING, 0.42))
+    assert view.progress.value() == 42
+    assert view.progress_label.text() == "Downloading “9k Freestyle (Official)”: 42%"
+    ctx.bridge.progress.emit(ProgressEvent(job.job_id + 1, JobStatus.DOWNLOADING, 0.9))
+    assert view.progress.value() == 42                      # another job: ignored
+    ctx.bridge.job_changed.emit(replace(job, status=JobStatus.CONVERTING))
+    assert view.progress.maximum() == 0                     # busy while converting
+    done = replace(job, status=JobStatus.COMPLETED, final_path=Path("/m/Watah/x.mp3"))
+    ctx.bridge.job_changed.emit(done)
+    assert view.progress.value() == 100 and "Downloaded" in view.progress_label.text()
+    assert messages[-1] == f"Saved {job.track.title} to {Path('/m/Watah')}"
+    ctx.bridge.progress.emit(ProgressEvent(job.job_id, JobStatus.DOWNLOADING, 0.5))
+    assert view.progress.value() == 100                     # late event after the end
+
+
+def test_playlist_column_and_filter(qtbot, ctx, failed):
+    fakes = Fakes([failed("1", "One", "Watah"), failed("2", "Two", "Dnb"),
+                   failed("3", "Three", "Watah"), failed("4", "Four", None)])
+    view = _view(qtbot, ctx, fakes)
+    qtbot.waitUntil(lambda: view.failed_model.rowCount() == 4)
+    model = view.failed_model
+    assert [model.data(model.index(r, av.F_PLAYLIST)) for r in range(4)] == \
+        ["Watah", "Dnb", "Watah", ""]
+    options = [view.playlist_filter.itemText(i) for i in range(view.playlist_filter.count())]
+    assert options == [av.ALL_PLAYLISTS, "Dnb", "Watah", av.NO_PLAYLIST]
+    view.playlist_filter.setCurrentText("Watah")
+    assert [model.row_at(r).track.title for r in range(model.rowCount())] == ["One", "Three"]
+    assert view.count_label.text() == "2 of 4 track(s)"
+    fakes.items = fakes.items[:3]                            # refresh keeps the filter
+    view.refresh()
+    qtbot.waitUntil(lambda: view.count_label.text() == "2 of 3 track(s)")
+    assert view.playlist_filter.currentText() == "Watah"
+    view.playlist_filter.setCurrentText(av.ALL_PLAYLISTS)
+    assert model.rowCount() == 3
 
 
 def test_search_is_cached_per_track_and_can_be_edited(qtbot, ctx, failed):
@@ -196,3 +252,38 @@ def test_page_sits_under_listen_in_the_window(qtbot, ctx):
     assert window.stack.currentWidget() is window.alternatives_view
     qtbot.waitUntil(lambda: window.alternatives_view.refresh_btn.isEnabled())
     window.close()
+
+
+def test_reason_labels(qtbot, ctx, failed):
+    from dataclasses import replace as rep
+    base = failed()
+    preview = rep(base, error=ErrorInfo(ErrorCategory.AUTH_REQUIRED, "m",
+                                        "only preview formats: ['hls_mp3_1_0_preview']"))
+    private = rep(base, error=ErrorInfo(ErrorCategory.AUTH_REQUIRED, "m", "private track"))
+    model = av.FailedModel()
+    model.set_rows([base, preview, private])
+    assert [model.data(model.index(r, av.F_REASON)) for r in range(3)] == \
+        ["DRM-protected", "Go+ (preview only)", "Sign-in needed"]
+
+
+def test_rate_limited_checks_are_retried_on_search(qtbot, ctx, failed):
+    from sclm.download.alternatives import RATE_LIMIT_MESSAGE
+    fakes = Fakes([failed()])
+    limited = SourceCheck(Availability.UNCHECKED, RATE_LIMIT_MESSAGE)
+    real = fakes.check
+    fakes.check = lambda url: (fakes.checks.append(url), limited)[1]
+    view = av.AlternativesView(ctx, search_fn=fakes.search, check_fn=lambda u: fakes.check(u),
+                               load_fn=fakes.load)
+    qtbot.addWidget(view)
+    view.refresh()
+    qtbot.waitUntil(lambda: len(view.candidate_model.checks) == 3)
+    model = view.candidate_model
+    assert model.data(model.index(0, av.C_SOURCE)) == "Couldn't check — Search again"
+    assert model.data(model.index(0, av.C_SOURCE), av.Qt.ItemDataRole.ToolTipRole) \
+        == RATE_LIMIT_MESSAGE
+    assert not view.download_btn.isEnabled()
+    fakes.check = real
+    view.search_btn.click()
+    qtbot.waitUntil(lambda: _all_checked(view)
+                    and model.checks[OK_URL].availability == Availability.AUDIO)
+    assert len(fakes.checks) == 6                         # each video checked again once

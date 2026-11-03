@@ -257,6 +257,58 @@ required that videos available only DRM-protected be labelled and never download
   - The user's own use of the page.
 
 
+## 0.4.1: playlist folders, progress, and fewer "Sign-in / Go+" failures
+
+- **Playlist folders.**
+  - Every failed download in the user's database has a `playlist_id`: 190 rows across
+    Watah, S2pid 8oh8s, Smoking 🚬, Dnb and Bass Mix. The 0.4.0 page did not pass it on,
+    so the 0.4.0 test file landed in `Singles/`.
+  - Now the failed list carries each playlist, and the download request includes it. The
+    organizer then uses the playlist folder, as for any download (the user's mode is
+    "playlist").
+  - Added a Playlist column and filter, and the confirm dialog shows the destination.
+  - A test with the real tagging/organizing pipeline puts the MP3 in `library/Smoking 🚬/`
+    with SoundCloud tags.
+- **Progress.**
+  - A progress bar and label follow the chosen candidate's job: download %, busy while
+    converting and tagging, then the final state.
+  - On completion, the status bar names the folder.
+- **"Sign-in / Go+" failures.**
+  - 105 of 130 listed tracks had that reason. 99 of those were DRM failures stored before
+    0.3.2 (detail "This video is DRM protected").
+  - They are now read back as DRM-protected; the database is not modified.
+  - What remains is 6 real Go+ 30-second previews and 1 sign-in case. A Go+ subscription
+    would not make the previews downloadable, because subscriber streams are DRM-encrypted
+    (0.3.1 findings).
+- **YouTube rate limit (found live).**
+  - After many test checks, YouTube answered HTTP 429, then "Sign in to confirm you're not
+    a bot". The page wrongly blamed a SoundCloud sign-in.
+  - Now:
+    - Both responses are classified as a temporary network limit with a clear message.
+    - Checks hit by the limit show "Couldn't check — Search again", are not cached, and
+      are retried.
+    - The smoke test reports this case as SKIP.
+  - SCLM does not try to get around the limit.
+- **Tests:** 664 passed, 4 skipped.
+- **Live check** (after YouTube lifted the limit). Setup: isolated `SCLM_HOME`, a backup
+  copy of the user's database.
+  - Reasons: 123 DRM-protected, 6 "Go+ (preview only)", 1 "Sign-in needed".
+  - Playlist filter: Bass Mix, Dnb, S2pid 8oh8s, Smoking 🚬, Watah, and no playlist.
+  - "9k Freestyle", official verified video:
+    - Saved to `library/Smoking 🚬/Chris Travis - 9k Freestyle.mp3` in 23.2 s.
+    - TALB "Smoking 🚬", SoundCloud title, artist and artwork.
+    - The history row keeps the playlist.
+  - Progress label: 0 % to 100 %, then Converting, Tagging and Downloaded.
+- **Smoke-test safety.**
+  - A 0.4.1 smoke run failed while the user's own windows covered the smoke window. Its
+    real (XTest) Play click could have landed in the user's SCLM window: one click on a
+    table row, which can't download anything.
+  - The smoke test now checks that the window under the click point is its own, and
+    otherwise reports SKIP without clicking (`_owns_point`).
+  - Only the uncovered case was exercised (PASS). The SKIP branch was reviewed, not run.
+
+## Limitations
+
 - **Host packages needed for the Listen page:** `python3-gi gir1.2-webkit2-4.1 gstreamer1.0-libav`.
   They are present on Mint 22 and not bundled. If they are missing, the page explains this
   and offers Open in browser.

@@ -46,6 +46,25 @@ def _load_null_sink() -> str | None:
     return out.stdout.strip()
 
 
+def _owns_point(x11, display, top_xid: int, x: int, y: int) -> bool:  # noqa: ANN001
+    """True if the deepest X window at screen point (x, y) is ``top_xid`` or inside it,
+    i.e. a synthetic click there reaches our window and nobody else's."""
+    x11.XDefaultRootWindow.restype = ctypes.c_ulong
+    root = ctypes.c_ulong(x11.XDefaultRootWindow(display))
+    w = root
+    while True:
+        child = ctypes.c_ulong()
+        dx, dy = ctypes.c_int(), ctypes.c_int()
+        if not x11.XTranslateCoordinates(display, root, w, ctypes.c_int(x), ctypes.c_int(y),
+                                         ctypes.byref(dx), ctypes.byref(dy),
+                                         ctypes.byref(child)):
+            return False
+        if not child.value:
+            break
+        w = child
+    return w.value == top_xid or top_xid in _x_ancestors(w.value)
+
+
 def _x_ancestors(xid: int) -> list[int]:
     """X window ids from ``xid``'s parent up to the root (XQueryTree)."""
     x11 = ctypes.CDLL("libX11.so.6")
@@ -262,26 +281,32 @@ def run(network: bool = False, screenshot_dir: str | None = None) -> int:
                 # The embed player's own Play button (anonymous: only valid before a pause,
                 # after which SoundCloud shows an "explore more" overlay there).
                 origin = browser.container.mapToGlobal(QPoint(0, 0))
-                xtst.XTestFakeMotionEvent(display, -1, origin.x() + 197, origin.y() + 33, 0)
-                xtst.XTestFakeButtonEvent(display, 1, 1, 0)
-                xtst.XTestFakeButtonEvent(display, 1, 0, 0)
-                x11.XFlush(display)
-                until(lambda: browser.playing, 20000, "website audio after clicking Play")
-                say("PASS web: SoundCloud AAC stream playing in the embedded player")
-                until(lambda: not player.playing, 5000, "local pause when the website plays")
-                say("PASS mix: website playback paused local playback")
-                window.show_page(PAGE_LIBRARY)
-                wait(4000)
-                assert browser.playing and listen.browser is browser
-                assert process.state() == process.ProcessState.Running
-                window.show_page(PAGE_LISTEN)
-                say("PASS web: kept playing on another page; same process, no reload")
-                shot(window, "3-listen-playing")
-                player.play()
-                until(lambda: not browser.playing, 10000, "web pause when local starts")
-                assert player.playing
-                say("PASS mix: resuming local playback paused the website (MPRIS)")
-                shot(window, "4-local-after-web")
+                x, y = origin.x() + 197, origin.y() + 33
+                if not _owns_point(x11, display, int(window.winId()), x, y):
+                    # A real click there would land in someone else's window.
+                    say("SKIP web audio click: another window covers the player; "
+                        "not clicking (keep the smoke window uncovered)")
+                else:
+                    xtst.XTestFakeMotionEvent(display, -1, x, y, 0)
+                    xtst.XTestFakeButtonEvent(display, 1, 1, 0)
+                    xtst.XTestFakeButtonEvent(display, 1, 0, 0)
+                    x11.XFlush(display)
+                    until(lambda: browser.playing, 20000, "website audio after clicking Play")
+                    say("PASS web: SoundCloud AAC stream playing in the embedded player")
+                    until(lambda: not player.playing, 5000, "local pause when the website plays")
+                    say("PASS mix: website playback paused local playback")
+                    window.show_page(PAGE_LIBRARY)
+                    wait(4000)
+                    assert browser.playing and listen.browser is browser
+                    assert process.state() == process.ProcessState.Running
+                    window.show_page(PAGE_LISTEN)
+                    say("PASS web: kept playing on another page; same process, no reload")
+                    shot(window, "3-listen-playing")
+                    player.play()
+                    until(lambda: not browser.playing, 10000, "web pause when local starts")
+                    assert player.playing
+                    say("PASS mix: resuming local playback paused the website (MPRIS)")
+                    shot(window, "4-local-after-web")
             else:
                 say("SKIP web audio click: not an X11 session")
         else:
@@ -301,12 +326,20 @@ def run(network: bool = False, screenshot_dir: str | None = None) -> int:
                     for r in range(alt.candidate_model.rowCount())]
             until(lambda: all(u in alt.candidate_model.checks for u in urls), 120000,
                   "candidate format checks")
-            ok = [u for u in urls if alt.candidate_model.checks[u].downloadable]
-            assert ok, "no downloadable candidate"
+            from sclm.download.alternatives import Availability
+            checks = [alt.candidate_model.checks[u] for u in urls]
+            ok = [c for c in checks if c.downloadable]
             first = alt.candidate_model.row_at(0)
-            say(f"PASS alternatives: {len(urls)} YouTube candidates, {len(ok)} downloadable; "
-                f"first {first.match.value} (Δ {first.delta_s:+.1f} s) "
-                f"{alt.candidate_model.checks[first.url].note}; nothing downloaded")
+            if ok:
+                say(f"PASS alternatives: {len(urls)} YouTube candidates, {len(ok)} "
+                    f"downloadable; first {first.match.value} (Δ {first.delta_s:+.1f} s) "
+                    f"{alt.candidate_model.checks[first.url].note}; nothing downloaded")
+            elif all(c.availability == Availability.UNCHECKED for c in checks):
+                say(f"SKIP alternatives checks: YouTube is rate-limiting this connection "
+                    f"({len(urls)} candidates found, none could be checked)")
+            else:
+                raise AssertionError("no downloadable candidate: "
+                                     + "; ".join(c.note for c in checks))
             shot(window, "5-alternatives")
     except AssertionError as exc:
         failures += 1

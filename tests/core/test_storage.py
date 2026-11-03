@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from sclm.core.errors import ErrorCategory, ErrorInfo, StorageError
+from sclm.core.errors import DrmProtectedError, ErrorCategory, ErrorInfo, StorageError
 from sclm.core.models import (
     JobStatus,
     LibraryFile,
@@ -319,3 +319,20 @@ def test_concurrent_access_from_threads(storage, make_track):
         t.join()
     assert errors == []
     assert len(storage.download_history(limit=1000)) == 150
+
+
+def test_legacy_drm_rows_filed_as_auth_required_read_back_as_drm(storage, make_track):
+    # Exactly what 0.3.1 and older stored for a DRM failure (from the user's database).
+    legacy = ErrorInfo(ErrorCategory.AUTH_REQUIRED,
+                       "This track is DRM-protected (typically SoundCloud Go+). SCLM does not "
+                       "bypass DRM.", "[soundcloud] 109665566: This video is DRM protected")
+    preview = ErrorInfo(ErrorCategory.AUTH_REQUIRED, "Only a 30-second preview…",
+                        "only preview formats: ['hls_mp3_1_0_preview']")
+    for track_id, error in (("1", legacy), ("2", preview)):
+        job = storage.create_download(make_track(track_id))
+        storage.update_download(job, status=JobStatus.FAILED, error=error)
+    by_track = {r.track_id: r.error for r in storage.download_history(limit=10)}
+    assert by_track["1"].category == ErrorCategory.DRM_PROTECTED
+    assert by_track["1"].user_message == DrmProtectedError.default_message
+    assert by_track["1"].detail == legacy.detail
+    assert by_track["2"] == preview                       # a real Go+ preview stays as it is

@@ -305,3 +305,19 @@ The lead confirmed it's gone.
   - the `run_one` fixture moved to `tests/download/conftest.py`
 - 657 passed, 4 skipped. Live 9k Freestyle download verified in an isolated home (see
   EVALUATION_REPORT 0.4.0).
+
+### 0.4.1 Alternatives: playlist folders, progress, relabelled failures (2026-11-02, lead: Claude Opus 5.5)
+
+- The user asked that replacements go to their playlist's folder. Done: `FailedTrack`
+  carries the playlist, the request passes it, and there is a Playlist column and filter.
+- The user asked for download progress for the chosen candidate. Done: a progress bar and
+  label driven by bridge events.
+- The user asked for fewer "Sign-in / Go+" failures. 99 of 105 were legacy DRM rows, now
+  relabelled on read by `stored_error_info`. The remaining 6 are real Go+ previews.
+- Found live: YouTube rate limiting (429, then the bot check) was mislabelled as a
+  SoundCloud sign-in. Now classified as a temporary limit; affected checks are retried.
+- Fixed: the 0.4.0 report edit had dropped the "## Limitations" heading.
+- Smoke test: the real Play click is skipped unless the smoke window is the one under
+  the click point (a covered window once risked clicking the user's own app).
+- Live: 9k Freestyle replacement saved to `Smoking 🚬/` with progress 0→100 %.
+- 664 passed, 4 skipped.
