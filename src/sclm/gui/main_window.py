@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from sclm import APP_DISPLAY_NAME, __version__
 from sclm.context import AppContext
 from sclm.gui import theme
+from sclm.gui.alternatives_view import AlternativesView
 from sclm.gui.history_view import HistoryView
 from sclm.gui.listening_view import ListeningView
 from sclm.gui.library_view import LibraryView
@@ -34,15 +35,15 @@ from sclm.gui.settings_dialog import SettingsDialog
 
 log = logging.getLogger(__name__)
 
-PAGE_DOWNLOAD, PAGE_QUEUE, PAGE_LIBRARY, PAGE_HISTORY, PAGE_LISTEN = range(5)
-PAGE_NAMES = ("Download", "Queue", "Library", "History", "Listen")
+PAGE_DOWNLOAD, PAGE_QUEUE, PAGE_LIBRARY, PAGE_HISTORY, PAGE_LISTEN, PAGE_ALTERNATIVES = range(6)
+PAGE_NAMES = ("Download", "Queue", "Library", "History", "Listen", "Alternatives")
 REFRESH_DEBOUNCE_MS = 800
 STATUS_MESSAGE_MS = 6000
 
 
 class MainWindow(QMainWindow):
-    """Top-level window: Download / Queue / Library / History / Listen pages, the local
-    player bar, and Settings.
+    """Top-level window: Download / Queue / Library / History / Listen / Alternatives pages,
+    the local player bar, and Settings.
 
     Receives everything through ``ctx``; constructs no services itself. The queue view
     connects ``ctx.bridge`` signals to its model. On close, asks for confirmation if
@@ -65,12 +66,15 @@ class MainWindow(QMainWindow):
         self.library_view = LibraryView(ctx)
         self.history_view = HistoryView(ctx)
         self.listening_view = ListeningView(ctx.paths)
+        self.alternatives_view = AlternativesView(ctx)
         self.player = PlayerController(self)
         self.player_bar = PlayerBar(self.player)
         self.queue_view.listen_requested.connect(self.listen)
         self.history_view.listen_requested.connect(self.listen)
+        self.alternatives_view.listen_requested.connect(self.listen)
         self.stack = QStackedWidget()
-        for page in (self.preview_panel, self.queue_view, self.library_view, self.history_view, self.listening_view):
+        for page in (self.preview_panel, self.queue_view, self.library_view, self.history_view,
+                     self.listening_view, self.alternatives_view):
             self.stack.addWidget(page)
 
         # --- navigation ---
@@ -131,7 +135,8 @@ class MainWindow(QMainWindow):
         # --- wiring ---
         self.queue_view.model.summary_changed.connect(self._update_queue_summary)
         ctx.bridge.job_changed.connect(self._on_job_changed)
-        for view in (self.preview_panel, self.queue_view, self.library_view, self.history_view):
+        for view in (self.preview_panel, self.queue_view, self.library_view, self.history_view,
+                     self.alternatives_view):
             view.message.connect(self.show_message)
         self.preview_panel.enqueued.connect(self._on_enqueued)
         self.library_view.library_changed.connect(self.update_library_count)
@@ -270,6 +275,8 @@ class MainWindow(QMainWindow):
             self.library_view.refresh()
         elif row == PAGE_HISTORY:
             self.history_view.refresh()
+        elif row == PAGE_ALTERNATIVES:
+            self.alternatives_view.refresh()
 
     def _on_enqueued(self, count: int) -> None:
         if count:

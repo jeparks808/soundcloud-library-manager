@@ -196,4 +196,7 @@ def download_opts(
     }
     if extra:
         opts.update(extra)
+    # Never download DRM-protected formats, from any site: yt-dlp then reports "This video
+    # is DRM protected" (classified as drm_protected) when nothing else is offered.
+    opts["allow_unplayable_formats"] = False
     return opts

@@ -21,6 +21,7 @@ import pytest
 
 from sclm.core.events import RecordingListener
 from sclm.core.models import (
+    DownloadRequest,
     DuplicateMatch,
     FinalizeOutcome,
     FinalizeResult,
@@ -381,3 +382,21 @@ def wait_until() -> Callable[..., None]:
         raise AssertionError(f"timed out waiting: {message or predicate}")
 
     return wait
+
+
+def terminal(manager, job_id) -> bool:
+    job = manager.get_job(job_id)
+    return job is not None and job.status.is_terminal
+
+
+@pytest.fixture
+def run_one(make_manager, fake_ydl, wait_until):
+    """Enqueue one track and wait until it is terminal. Returns (manager, job)."""
+    def run(track, *, manager=None, request_kwargs=None, timeout=5.0, **script):
+        if track.url not in fake_ydl.scripts:
+            fake_ydl.add(track, **script)
+        m = manager or make_manager()
+        [job] = m.enqueue([DownloadRequest(track, **(request_kwargs or {}))])
+        wait_until(lambda: terminal(m, job.job_id), timeout=timeout)
+        return m, m.get_job(job.job_id)
+    return run

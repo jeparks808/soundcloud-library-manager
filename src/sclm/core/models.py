@@ -172,6 +172,10 @@ class DownloadRequest:
     playlist_id: str | None = None
     playlist_title: str | None = None
     force: bool = False   # skip duplicate checks; path conflicts use KEEP_BOTH
+    # Manual alternative audio source (a YouTube video the user picked on the Alternatives
+    # page). The audio comes from here; metadata, artwork and duplicate checks stay with
+    # ``track`` (SoundCloud). DRM-only sources are never downloaded.
+    audio_source_url: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,6 +195,7 @@ class DownloadJob:
     duplicate_of: Path | None = None    # set when SKIPPED_DUPLICATE
     force: bool = False
     actual_bitrate_kbps: int | None = None   # measured from the MP3 when COMPLETED
+    audio_source_url: str | None = None      # see DownloadRequest.audio_source_url
 
 
 @dataclass(frozen=True, slots=True)
