@@ -9,7 +9,7 @@ optional.
 Download only audio you are authorized to download. The app does not bypass DRM or
 SoundCloud access restrictions; unavailable or restricted tracks are reported as errors.
 
-## Features (0.3.x)
+## Features (0.4.x)
 
 | Area | Status |
 |---|---|
@@ -18,6 +18,7 @@ SoundCloud access restrictions; unavailable or restricted tracks are reported as
 | **Listen page**: the official SoundCloud website (sign in, browse, play) embedded in the app, playing while you use other pages | **Rebuilt, tested with public tracks** |
 | One audio source at a time: starting local playback pauses the website and vice versa | **New, tested** |
 | SoundCloud Go+ tracks | Not playable in the app (DRM); open in Firefox — see below |
+| **Alternatives page**: for downloads SoundCloud refuses (DRM, Go+, unavailable, region), compare YouTube uploads by length and download one you choose as MP3 with the SoundCloud tags and artwork | **New in 0.4.0, tested** |
 
 ### Local player
 
@@ -85,14 +86,46 @@ On Wayland sessions the helper cannot be embedded; it opens as its own window in
 The desktop's sound applet and media keys also see the web player (MPRIS) as
 "SoundCloud (Library Manager)".
 
+### Alternatives (YouTube audio for failed downloads)
+
+The **Alternatives** page (under Listen, Ctrl+6) lists tracks whose download failed because
+SoundCloud only streams them DRM-protected, needs Go+, or reports them as unavailable or
+blocked in your region. Select a track to see up to six YouTube uploads with the same
+title, plus:
+
+* each upload's length and its difference (Δ) from the SoundCloud length
+  * **Same length**: within 3 s, usually the same recording
+  * **Close**: within 10 s
+  * **Different**: often a live or edited version
+* whether the channel is verified, and view count
+* an **Audio** label checked for each video: the stream quality you would get
+  ("OK · Opus 147 kbps"), **DRM only — can't download**, or why the video is unavailable
+
+**Open video** plays it in your browser so you can check it. Edit the search text and press
+**Search YouTube** if the right upload isn't listed. **Download as MP3** asks for
+confirmation, then queues the download. The file is tagged with SoundCloud's title,
+artist and artwork and track id, so the library and duplicate checks treat it as that
+track. Its comment records the YouTube URL.
+
+Things to know:
+
+* **Quality.** YouTube audio is lossy, about 130–160 kbps Opus or AAC. It is re-encoded to
+  your MP3 bitrate, so a 320 kbps file from this source is not 320 kbps quality.
+* **DRM.** Videos offered only DRM-protected are labelled and never downloaded. yt-dlp is
+  always run with DRM formats disallowed.
+* **Rights.** Download only what you're allowed to. Nothing is downloaded until you confirm
+  a specific video.
+* yt-dlp may warn that no JavaScript runtime is installed. Audio is still available today.
+  If YouTube changes that, use Help → Update yt-dlp….
+
 ## Install the AppImage
 
 Download `SoundCloud_Library_Manager-<version>-x86_64.AppImage` from the GitHub release,
 check it against the published SHA-256, make it executable and double-click it:
 
 ```sh
-sha256sum SoundCloud_Library_Manager-0.3.2-x86_64.AppImage
-chmod +x SoundCloud_Library_Manager-0.3.2-x86_64.AppImage
+sha256sum SoundCloud_Library_Manager-0.4.0-x86_64.AppImage
+chmod +x SoundCloud_Library_Manager-0.4.0-x86_64.AppImage
 ```
 
 The AppImage needs FUSE (`fusermount`/`fusermount3`); without it, run it with

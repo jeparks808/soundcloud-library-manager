@@ -335,11 +335,13 @@ PreviewEntry(track: TrackInfo, existing_path: Path | None = None)   .is_new -> b
 PlaylistPreview(playlist: PlaylistInfo, entries: tuple[PreviewEntry, ...],
                 sync: PlaylistSyncResult = PlaylistSyncResult())   .new_entries
 DownloadRequest(track: TrackInfo, playlist_id: str | None = None,
-                playlist_title: str | None = None, force: bool = False)
+                playlist_title: str | None = None, force: bool = False,
+                audio_source_url: str | None = None)      # 0.4.0, see §20
 DownloadJob(job_id: int, track: TrackInfo, playlist_id: str | None = None,
             playlist_title: str | None = None, status: JobStatus = QUEUED, attempts: int = 0,
             fraction: float | None = None, message: str = "", error: ErrorInfo | None = None,
-            final_path: Path | None = None, duplicate_of: Path | None = None, force: bool = False)
+            final_path: Path | None = None, duplicate_of: Path | None = None, force: bool = False,
+            audio_source_url: str | None = None)
 ProgressEvent(job_id: int, status: JobStatus, fraction: float | None = None,
               downloaded_bytes: int | None = None, total_bytes: int | None = None,
               speed_bps: float | None = None, eta_s: float | None = None)
@@ -580,6 +582,7 @@ None` via `urllib`, injectable in tests), `organizer.py` (`plan_destination(...)
 | `preview_panel.py` | URL field, Fetch, preview table with checkboxes, "Only new" toggle, "Download selected", added/removed counts from `PlaylistPreview.sync` |
 | `queue_view.py` | Table model fed by bridge signals: status, progress bar, message. Actions: Cancel, Retry, "Keep both" (`retry(force=True)`), Cancel all, Clear finished |
 | `history_view.py` | `storage.download_history(...)`, paged, with filter by status and error details |
+| `alternatives_view.py` | Alternatives page (0.4.0, §20): failed downloads, YouTube candidates with length match and DRM/availability labels, confirmed "Download as MP3" |
 | `library_view.py` | `storage.list_library_files(search=...)`, "Scan library" (`scan_library` in the background), open the containing folder, "Edit tags…" |
 | `metadata_editor.py` | Dialog: `read_tags` → form (title, artist, album, album artist, genre, year, track #, comment, cover image) → explicit Save → `save_tags` (both via `run_in_background`). Shows track id and source URL read-only |
 | `settings_dialog.py` | Edits `Settings` and validates with `Settings.replace` (shows `ConfigError.user_message` inline). Shows the resolved ffmpeg path and version (in the background) and a live filename preview through `metadata.naming.render_filename`. Saves through `ctx.settings.update(...)` |
@@ -911,3 +914,68 @@ MainWindow ── ListeningView (gui/listening_view.py)   address bar, status, e
   still does.)
 
 All file reads and decoding happen in Qt's multimedia threads.
+
+## 20. Alternatives page: manual YouTube audio source (0.4.0)
+
+For tracks SoundCloud won't let SCLM download, the user can pick a YouTube upload of the
+same recording and use its audio. It is manual by design: nothing is searched for or
+downloaded automatically after a failure, and every download is confirmed in a dialog.
+
+`download/alternatives.py` (no Qt):
+
+* `failed_tracks(storage)` lists tracks whose newest outcome is FAILED and that failed at
+  least once with `drm_protected`, `auth_required`, `unavailable` or `geo_blocked`. Tracks
+  with a later COMPLETED or duplicate-skipped download, or with a file in the library, are
+  left out. Network, FFmpeg and similar failures are not listed, because Retry handles
+  those.
+* `search_youtube(query, reference_s=, cache_dir=)` runs one flat `ytsearch6:` request
+  (`extract_flat`, no per-video page loads). It returns `Candidate`s with length, Δ against
+  the SoundCloud length, `MatchLevel` (MATCH ≤ 3 s, CLOSE ≤ 10 s, DIFFERENT, UNKNOWN),
+  verified-channel flag and views. Ranking is by match level, then |Δ|, then verified
+  channel first. Live and upcoming streams are dropped.
+* `check_source(url)` loads one video's formats with `process=False` and
+  `allow_unplayable_formats=False`, without downloading:
+  * `AUDIO` with the best clear audio stream ("Opus 147 kbps")
+  * `DRM_ONLY` when every audio format has `has_drm`, or yt-dlp reports DRM
+  * `UNAVAILABLE` with the reason
+* `youtube_video_id(url)` accepts only `https` YouTube watch, shorts and youtu.be URLs
+  with an 11-character id and no credentials.
+
+Download (`DownloadManager._attempt`) with `DownloadRequest.audio_source_url` set:
+
+* Anything that isn't a YouTube video URL fails with `invalid_url` before any request.
+* yt-dlp extracts the YouTube URL, not the SoundCloud one. If every format is DRM-protected,
+  the job fails with `drm_protected` and nothing is downloaded.
+  `download_opts` always forces `allow_unplayable_formats=False`, even over `extra`, so
+  yt-dlp never selects a DRM format from any site.
+* Tags, artwork, filename, organization and duplicate checks use the **SoundCloud** track
+  (`with_soundcloud_metadata` refreshes a partial track from the SoundCloud API, metadata
+  only). The ID3 comment records the source:
+  "Audio from YouTube: <url> (… lossy source re-encoded to MP3)". WOAS stays the SoundCloud
+  URL and TXXX SOUNDCLOUD_TRACK_ID the SoundCloud id, so the file counts as that track.
+* The job message ends with "(audio from YouTube; lossy source)". Retry keeps the source.
+
+`gui/alternatives_view.py` (page 6, Ctrl+6, under Listen):
+
+* Failed-downloads table (artist, title, SoundCloud length, reason), Refresh, and
+  **Listen on SoundCloud**.
+* Selecting a track searches automatically. Results are cached per track. The search text
+  is editable, and **Search YouTube** re-runs it.
+* Candidates table: title, channel (✓ verified), length, Δ, match, views, and an Audio
+  label, checked in the background once per video per session: "Checking…",
+  "OK · Opus 147 kbps", "DRM only — can't download" (red), or "Unavailable: …".
+* **Open video** opens the https YouTube URL in the default browser (also on double-click).
+* **Download as MP3** is enabled only for a checked, downloadable candidate. It refuses
+  DRM-only and unchecked videos even when called directly. The confirmation dialog states
+  that the source is lossy and re-encoded and to download only what the user is allowed
+  to. Then it calls `ctx.manager.enqueue([DownloadRequest(track, audio_source_url=url)])`.
+* Loading, searches and checks run through `run_in_background`, never on the GUI thread.
+  The list reloads when a download finishes while the page is shown.
+
+Limitations:
+
+* yt-dlp warns that no JavaScript runtime (deno) is installed. Audio formats are still
+  offered (checked live), but YouTube may change that, and an updated yt-dlp (Help → Update
+  yt-dlp…) may then be needed.
+* A format check takes about 1.5–5 s per video on the i5-5350U.
+* Matching is by length and title only; the user confirms by listening.

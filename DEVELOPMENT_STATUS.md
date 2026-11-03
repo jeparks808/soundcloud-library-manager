@@ -288,3 +288,20 @@ The lead confirmed it's gone.
   `DrmProtectedError` with an accurate message instead of `auth_required` + "Go+".
 - Declined, earlier in this session: a DRM-circumventing download fallback. The Reddit
   OAuth-header method equals the app's existing cookies-file sign-in and cannot get past DRM.
+
+### 0.4.0 Alternatives page (2026-11-02, lead: Claude Opus 5.5)
+
+- The user asked for a manual fallback tab under Listen. It lists failed downloads (DRM,
+  Go+, unavailable, region), shows YouTube candidates with a length check, and downloads a
+  user-confirmed candidate as MP3 knowing the audio is lossy.
+- The user required that DRM-only sources be labelled and never downloaded. This is
+  enforced in the check, the page and the manager, and `allow_unplayable_formats` is
+  always False.
+- Files:
+  - `download/alternatives.py`
+  - `gui/alternatives_view.py`
+  - `DownloadRequest/DownloadJob.audio_source_url`
+  - manager branch
+  - the `run_one` fixture moved to `tests/download/conftest.py`
+- 657 passed, 4 skipped. Live 9k Freestyle download verified in an isolated home (see
+  EVALUATION_REPORT 0.4.0).

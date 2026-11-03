@@ -20,9 +20,11 @@ from typing import Any, Protocol
 from sclm.core.errors import (
     NETWORK_BACKOFF_BASE_S,
     NETWORK_MAX_ATTEMPTS,
+    DrmProtectedError,
     ErrorCategory,
     ErrorInfo,
     FFmpegError,
+    InvalidUrlError,
     JobCancelled,
     SclmError,
     TrackUnavailableError,
@@ -46,6 +48,11 @@ from sclm.core.models import (
 from sclm.core.paths import AppPaths
 from sclm.core.settings import CONCURRENCY_MAX, CONCURRENCY_MIN, Settings, SettingsStore
 from sclm.core.storage import CLEAR, Storage
+from sclm.download.alternatives import (
+    is_youtube_video_url,
+    source_note,
+    with_soundcloud_metadata,
+)
 from sclm.download.errors import classify_ytdlp_error
 from sclm.download.mapping import ensure_full_audio, merge_resolved, trackinfo_from_info
 from sclm.download.ytdlp_opts import build_download_ydl, download_opts, prepare_cookiefile
@@ -271,7 +278,8 @@ class DownloadManager:
                     job = DownloadJob(job_id=job_id, track=req.track,
                                       playlist_id=req.playlist_id,
                                       playlist_title=req.playlist_title, force=req.force,
-                                      message=_STAGE_MESSAGES[JobStatus.QUEUED])
+                                      message=_STAGE_MESSAGES[JobStatus.QUEUED],
+                                      audio_source_url=req.audio_source_url)
                     entry = _Entry(job=job, cancel=threading.Event())
                     # Hold the job's order lock until QUEUED is announced, so a cancel()
                     # on another thread can't announce CANCELLED first. Uncontended: no
@@ -736,10 +744,14 @@ class DownloadManager:
             progress_hook=progress_hook, postprocessor_hook=postprocessor_hook,
             cookiefile=cookiefile, extra=self._extra_ydl_opts)
 
+        source = job.audio_source_url
+        if source is not None and not is_youtube_video_url(source):
+            raise InvalidUrlError("The alternative source must be a YouTube video URL.",
+                                  detail=source)
         with self._ydl_factory(opts) as ydl:
             # Resolve without processing so the single process_ie_result(download=True) below
             # is the only processing pass (no second page fetch, no double field filling).
-            info = ydl.extract_info(job.track.url, download=False, process=False)
+            info = ydl.extract_info(source or job.track.url, download=False, process=False)
             if isinstance(info, Mapping) and info.get("_type") in ("url", "url_transparent"):
                 info = ydl.process_ie_result(dict(info), download=False)  # redirect / short link
             _check_cancel(cancel)
@@ -747,9 +759,19 @@ class DownloadManager:
                 raise TrackUnavailableError(detail="yt-dlp returned no information")
             if info.get("_type") in ("playlist", "multi_video"):
                 raise TrackUnavailableError("This URL is a playlist, not a single track.",
-                                            detail=job.track.url)
-            ensure_full_audio(info)
-            track = merge_resolved(job.track, trackinfo_from_info(info, partial=False))
+                                            detail=source or job.track.url)
+            if source is None:
+                ensure_full_audio(info)
+                track = merge_resolved(job.track, trackinfo_from_info(info, partial=False))
+            else:
+                # Audio from the chosen video; everything else stays SoundCloud's.
+                formats = info.get("formats")
+                if isinstance(formats, list) and formats \
+                        and all(isinstance(f, Mapping) and f.get("has_drm") for f in formats):
+                    raise DrmProtectedError("This video is only available DRM-protected; "
+                                            "SCLM does not download it.", detail=source)
+                track = replace(with_soundcloud_metadata(ydl, job.track),
+                                description=source_note(source))
             self._storage.upsert_track(track)
             self._transition(job_id, persist=False, track=track)
 
@@ -776,7 +798,11 @@ class DownloadManager:
         outcome = self._finalize(staged, track, playlist_title=job.playlist_title,
                                  settings=settings, storage=self._storage, force=job.force,
                                  on_stage=on_stage, cancel=cancel)
-        return self._record(job_id, track, outcome, settings, actual_bitrate)
+        final = self._record(job_id, track, outcome, settings, actual_bitrate)
+        if source is not None and final["status"] == JobStatus.COMPLETED:
+            final["message"] += " (audio from YouTube; lossy source)"
+            log.info("Job %s: audio for %s taken from %s", job_id, track.track_id, source)
+        return final
 
     def _record(self, job_id: int, track: TrackInfo, result: FinalizeResult,
                 settings: Settings, actual_bitrate: int | None = None) -> dict[str, Any]:

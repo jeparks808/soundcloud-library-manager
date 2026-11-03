@@ -40,19 +40,6 @@ def terminal(manager, job_id):
     return job is not None and job.status.is_terminal
 
 
-@pytest.fixture
-def run_one(make_manager, fake_ydl, wait_until):
-    """Enqueue one track and wait until it is terminal. Returns (manager, job)."""
-    def run(track, *, manager=None, request_kwargs=None, timeout=5.0, **script):
-        if track.url not in fake_ydl.scripts:
-            fake_ydl.add(track, **script)
-        m = manager or make_manager()
-        [job] = m.enqueue([DownloadRequest(track, **(request_kwargs or {}))])
-        wait_until(lambda: terminal(m, job.job_id), timeout=timeout)
-        return m, m.get_job(job.job_id)
-    return run
-
-
 # --- happy path --------------------------------------------------------------------------
 
 def test_enqueue_to_completed(run_one, make_track, listener, storage, app_paths, fake_finalize,

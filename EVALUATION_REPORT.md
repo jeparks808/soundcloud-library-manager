@@ -206,7 +206,49 @@ not look like real errors. Findings:
   - Live classification of the real "9k Freestyle" failure gives `drm_protected` with the
     new message.
 
-## Limitations
+## 0.4.0: Alternatives page (manual YouTube audio source)
+
+The user asked for a manual fallback for failed downloads, placed under Listen. Each failed
+track is compared against YouTube uploads of the same title and checked for length. The
+user then decides per track, accepting that the audio may be lower quality. They also
+required that videos available only DRM-protected be labelled and never downloaded.
+
+- **Built:**
+  - `download/alternatives.py`: failed-track list, flat YouTube search, length match and
+    ranking, per-video format check with DRM labelling.
+  - A manager branch that downloads `audio_source_url` while tagging with the SoundCloud
+    metadata.
+  - `gui/alternatives_view.py`: page 6, Ctrl+6.
+  - Design in ARCHITECTURE §20.
+- **DRM stays out at three levels:**
+  - The check labels DRM-only videos.
+  - The page refuses to download them, even when its method is called directly.
+  - The manager refuses a source whose formats are all DRM.
+  - Separately, `download_opts` now always forces `allow_unplayable_formats=False`.
+- **Automated tests:** 26 new, 7 of them GUI.
+  - Full suite: 657 passed, 4 skipped (network tests, opt-in).
+- **Live check** (lead-run, isolated `SCLM_HOME`):
+  - Setup: a SQLite-backup copy of the user's database, library folder in the scratchpad.
+    The real database was opened read-only.
+  - The page listed 130 failed tracks (DRM-protected and sign-in/Go+).
+  - "Chris Travis – 9k Freestyle", 6 candidates:
+    - The official verified video came first: Δ +2.3 s, Opus 147 kbps.
+    - A live version was marked Different (Δ −34.7 s).
+    - All 6 were downloadable. None was DRM-only, so the DRM label was not seen live, only in
+      tests.
+  - The confirmed download completed in 23.5 s: 134.6 s MP3.
+    - Tags from SoundCloud: TIT2 "9k Freestyle", TPE1 "Chris Travis", 65 KB JPEG APIC, WOAS
+      the SoundCloud URL, TXXX id 109665566.
+    - COMM names the YouTube URL.
+  - The track then left the failed list (130 → 129).
+- **Timings** (i5-5350U, source build):
+  - Search: 10.5 s, including the first yt-dlp import.
+  - Checking 6 videos in parallel: 28 s more.
+- **Not verified:**
+  - A real YouTube video offered only with DRM (none found to test with).
+  - The new page in the AppImage beyond the self-test and smoke run below.
+  - The user's own use of the page.
+
 
 - **Host packages needed for the Listen page:** `python3-gi gir1.2-webkit2-4.1 gstreamer1.0-libav`.
   They are present on Mint 22 and not bundled. If they are missing, the page explains this
