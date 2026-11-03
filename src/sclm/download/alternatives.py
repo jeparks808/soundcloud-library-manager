@@ -79,6 +79,9 @@ class FailedTrack:
     track: TrackInfo
     error: ErrorInfo
     download_id: int
+    # The playlist the failed download came from: the replacement goes to the same folder.
+    playlist_id: str | None = None
+    playlist_title: str | None = None
 
 
 def youtube_video_id(url: str) -> str | None:
@@ -186,6 +189,7 @@ class Availability(StrEnum):
     AUDIO = "audio"              # a non-DRM audio stream exists: downloadable
     DRM_ONLY = "drm_only"        # every stream is DRM-protected: never downloaded
     UNAVAILABLE = "unavailable"  # removed, private, sign-in/age gate, no formats, ...
+    UNCHECKED = "unchecked"      # network error or YouTube rate limit: try again later
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +207,18 @@ class SourceCheck:
 def _num(value: Any) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) \
         else None
+
+
+RATE_LIMIT_MESSAGE = ("YouTube is limiting requests from your connection (too many in a short "
+                      "time). Wait a few minutes, then press Search YouTube to try again.")
+
+
+def friendly_error(info: ErrorInfo) -> str:
+    """User text for a failed search or check; names YouTube's rate limit (HTTP 429)."""
+    detail = info.detail.lower()
+    if "429" in detail or "too many requests" in detail or "not a bot" in detail:
+        return RATE_LIMIT_MESSAGE
+    return info.user_message
 
 
 def availability_from_formats(formats: Any) -> SourceCheck:
@@ -241,7 +257,10 @@ def check_source(url: str, *, cache_dir: Path, ydl_factory: YdlFactory | None = 
         err = classify_ytdlp_error(exc)
         if err.category == ErrorCategory.DRM_PROTECTED:
             return SourceCheck(Availability.DRM_ONLY, "DRM only")
-        return SourceCheck(Availability.UNAVAILABLE, err.user_message)
+        info = err.to_info()
+        if info.retryable:
+            return SourceCheck(Availability.UNCHECKED, friendly_error(info))
+        return SourceCheck(Availability.UNAVAILABLE, info.user_message)
     if not isinstance(info, Mapping):
         return SourceCheck(Availability.UNAVAILABLE, "no information")
     return availability_from_formats(info.get("formats"))
@@ -266,13 +285,21 @@ def failed_tracks(storage: Storage, *, limit: int = 1000) -> list[FailedTrack]:
     failed = [reason[tid] for tid, rec in latest.items()
               if rec.status == JobStatus.FAILED and tid in reason]
     present = storage.existing_track_paths([rec.track_id for rec in failed])
+    titles: dict[str, str | None] = {}
     result = []
     for rec in failed:
         if rec.track_id in present:
             continue
         track = storage.get_track(rec.track_id)
-        if track is not None:
-            result.append(FailedTrack(track=track, error=rec.error, download_id=rec.id))
+        if track is None:
+            continue
+        playlist_id = rec.playlist_id or latest[rec.track_id].playlist_id
+        if playlist_id is not None and playlist_id not in titles:
+            playlist = storage.get_playlist(playlist_id)
+            titles[playlist_id] = playlist.title if playlist is not None else None
+        result.append(FailedTrack(track=track, error=rec.error, download_id=rec.id,
+                                  playlist_id=playlist_id,
+                                  playlist_title=titles.get(playlist_id) if playlist_id else None))
     return result
 
 

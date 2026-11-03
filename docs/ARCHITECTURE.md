@@ -927,7 +927,8 @@ downloaded automatically after a failure, and every download is confirmed in a d
   least once with `drm_protected`, `auth_required`, `unavailable` or `geo_blocked`. Tracks
   with a later COMPLETED or duplicate-skipped download, or with a file in the library, are
   left out. Network, FFmpeg and similar failures are not listed, because Retry handles
-  those.
+  those. Each `FailedTrack` carries the failed download's `playlist_id` and playlist title
+  (0.4.1).
 * `search_youtube(query, reference_s=, cache_dir=)` runs one flat `ytsearch6:` request
   (`extract_flat`, no per-video page loads). It returns `Candidate`s with length, Δ against
   the SoundCloud length, `MatchLevel` (MATCH ≤ 3 s, CLOSE ≤ 10 s, DIFFERENT, UNKNOWN),
@@ -938,6 +939,9 @@ downloaded automatically after a failure, and every download is confirmed in a d
   * `AUDIO` with the best clear audio stream ("Opus 147 kbps")
   * `DRM_ONLY` when every audio format has `has_drm`, or yt-dlp reports DRM
   * `UNAVAILABLE` with the reason
+  * `UNCHECKED` for network errors and YouTube's rate limit (HTTP 429, or "Sign in to
+    confirm you're not a bot"). Not cached: **Search YouTube** checks the video again. SCLM
+    waits the limit out and never tries to get around it (0.4.1).
 * `youtube_video_id(url)` accepts only `https` YouTube watch, shorts and youtu.be URLs
   with an 11-character id and no credentials.
 
@@ -957,8 +961,9 @@ Download (`DownloadManager._attempt`) with `DownloadRequest.audio_source_url` se
 
 `gui/alternatives_view.py` (page 6, Ctrl+6, under Listen):
 
-* Failed-downloads table (artist, title, SoundCloud length, reason), Refresh, and
-  **Listen on SoundCloud**.
+* Failed-downloads table (artist, title, playlist, SoundCloud length, reason), a playlist
+  filter, Refresh, and **Listen on SoundCloud**. Reasons: DRM-protected, "Go+ (preview
+  only)", "Sign-in needed", Unavailable, "Not in your region".
 * Selecting a track searches automatically. Results are cached per track. The search text
   is editable, and **Search YouTube** re-runs it.
 * Candidates table: title, channel (✓ verified), length, Δ, match, views, and an Audio
@@ -968,7 +973,15 @@ Download (`DownloadManager._attempt`) with `DownloadRequest.audio_source_url` se
 * **Download as MP3** is enabled only for a checked, downloadable candidate. It refuses
   DRM-only and unchecked videos even when called directly. The confirmation dialog states
   that the source is lossy and re-encoded and to download only what the user is allowed
-  to. Then it calls `ctx.manager.enqueue([DownloadRequest(track, audio_source_url=url)])`.
+  to, and shows the destination folder. Then it calls
+  `ctx.manager.enqueue([DownloadRequest(track, playlist_id, playlist_title,
+  audio_source_url=url)])`, so the MP3 is organized like the original download: in
+  playlist mode, into that playlist's folder (0.4.1).
+* A progress bar and label under the candidates follow that job, fed by `bridge.progress`
+  and `bridge.job_changed`:
+  * "Downloading “<video>”: 42%"
+  * a busy bar while resolving, converting and tagging
+  * the final state; on completion the status bar shows the folder it was saved to
 * Loading, searches and checks run through `run_in_background`, never on the GUI thread.
   The list reloads when a download finishes while the page is shown.
 
@@ -979,3 +992,11 @@ Limitations:
   yt-dlp…) may then be needed.
 * A format check takes about 1.5–5 s per video on the i5-5350U.
 * Matching is by length and title only; the user confirms by listening.
+
+### Legacy error rows (0.4.1)
+
+`core.errors.stored_error_info` reads back rows written before 0.3.2. Those rows stored a
+DRM failure (detail "This video is DRM protected") as `auth_required` with a "typically
+SoundCloud Go+" message. They are returned as `drm_protected` with the current message. The
+database rows are not modified. In the user's library this moved 99 of 105
+"Sign-in / Go+" failures to DRM-protected. The remaining 6 are real Go+ 30-second previews.

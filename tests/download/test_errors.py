@@ -120,6 +120,9 @@ CASES = [
      ErrorCategory.AUTH_REQUIRED),
     ("drm", lambda: as_download_error(None, "This video is DRM protected"),
      ErrorCategory.DRM_PROTECTED),
+    ("youtube-bot-check", lambda: DownloadError(
+        "ERROR: [youtube] svlzfK6EiAE: Sign in to confirm you’re not a bot. Use "
+        "--cookies-from-browser or --cookies for the authentication."), ErrorCategory.NETWORK),
     ("private-text", lambda: as_download_error(None, "This track is private"),
      ErrorCategory.PRIVATE),
     ("no-formats", lambda: as_download_error(

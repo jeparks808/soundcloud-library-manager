@@ -90,8 +90,8 @@ The desktop's sound applet and media keys also see the web player (MPRIS) as
 
 The **Alternatives** page (under Listen, Ctrl+6) lists tracks whose download failed because
 SoundCloud only streams them DRM-protected, needs Go+, or reports them as unavailable or
-blocked in your region. Select a track to see up to six YouTube uploads with the same
-title, plus:
+blocked in your region. Each row shows the playlist it came from, and you can filter by
+playlist. Select a track to see up to six YouTube uploads with the same title, plus:
 
 * each upload's length and its difference (Δ) from the SoundCloud length
   * **Same length**: within 3 s, usually the same recording
@@ -103,9 +103,11 @@ title, plus:
 
 **Open video** plays it in your browser so you can check it. Edit the search text and press
 **Search YouTube** if the right upload isn't listed. **Download as MP3** asks for
-confirmation, then queues the download. The file is tagged with SoundCloud's title,
-artist and artwork and track id, so the library and duplicate checks treat it as that
-track. Its comment records the YouTube URL.
+confirmation, which shows the destination folder, then downloads with a progress bar under
+the list. The file goes where the original download would have gone (with "organize by
+playlist", that playlist's folder). It is tagged with SoundCloud's title, artist, artwork
+and track id, so the library and duplicate checks treat it as that track. Its comment
+records the YouTube URL.
 
 Things to know:
 
@@ -115,6 +117,10 @@ Things to know:
   always run with DRM formats disallowed.
 * **Rights.** Download only what you're allowed to. Nothing is downloaded until you confirm
   a specific video.
+* **YouTube rate limits.** Every track you open searches YouTube and checks each upload.
+  After many in a short time, YouTube blocks your connection for a while (HTTP 429 or "Sign
+  in to confirm you're not a bot"). The page then shows "Couldn't check — Search again".
+  Wait, then press **Search YouTube**.
 * yt-dlp may warn that no JavaScript runtime is installed. Audio is still available today.
   If YouTube changes that, use Help → Update yt-dlp….
 
@@ -124,8 +130,8 @@ Download `SoundCloud_Library_Manager-<version>-x86_64.AppImage` from the GitHub 
 check it against the published SHA-256, make it executable and double-click it:
 
 ```sh
-sha256sum SoundCloud_Library_Manager-0.4.0-x86_64.AppImage
-chmod +x SoundCloud_Library_Manager-0.4.0-x86_64.AppImage
+sha256sum SoundCloud_Library_Manager-0.4.1-x86_64.AppImage
+chmod +x SoundCloud_Library_Manager-0.4.1-x86_64.AppImage
 ```
 
 The AppImage needs FUSE (`fusermount`/`fusermount3`); without it, run it with

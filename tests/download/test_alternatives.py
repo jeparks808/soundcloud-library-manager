@@ -8,8 +8,9 @@ import pytest
 from yt_dlp.utils import DownloadError
 
 from sclm.core.errors import ErrorCategory, ErrorInfo
-from sclm.core.models import DownloadRequest, JobStatus, LibraryFile, LibrarySource
+from sclm.core.models import DownloadRequest, JobStatus, LibraryFile, LibrarySource, PlaylistInfo
 from sclm.download.alternatives import (
+    RATE_LIMIT_MESSAGE,
     Availability,
     MatchLevel,
     availability_from_formats,
@@ -135,6 +136,16 @@ def test_check_source_never_allows_drm_and_labels_errors(tmp_path):
     ok = check_source(VIDEO, cache_dir=tmp_path,
                       ydl_factory=_factory({"formats": [_fmt("251")]}, seen))
     assert ok.downloadable
+    limited = DownloadError("ERROR: [youtube] x: Unable to download webpage: HTTP Error 429: "
+                            "Too Many Requests")
+    check = check_source(VIDEO, cache_dir=tmp_path, ydl_factory=_factory(limited, seen))
+    assert check.availability == Availability.UNCHECKED and not check.downloadable
+    assert check.note == RATE_LIMIT_MESSAGE
+    bot = DownloadError("ERROR: [youtube] x: Sign in to confirm you’re not a bot. Use "
+                        "--cookies-from-browser or --cookies for the authentication.")
+    check = check_source(VIDEO, cache_dir=tmp_path, ydl_factory=_factory(bot, seen))
+    assert check.availability == Availability.UNCHECKED
+    assert check.note == RATE_LIMIT_MESSAGE and "SoundCloud" not in check.note
 
 
 def test_download_opts_never_allow_drm_formats(settings, tmp_path):
@@ -147,13 +158,15 @@ def test_download_opts_never_allow_drm_formats(settings, tmp_path):
 # --- failed tracks -------------------------------------------------------------------------
 
 def test_failed_tracks_lists_only_unresolved_alternative_failures(storage, make_track, tmp_path):
-    def fail(track, category):
-        job = storage.create_download(track)
+    def fail(track, category, playlist_id=None):
+        job = storage.create_download(track, playlist_id=playlist_id)
         storage.update_download(job, status=S.FAILED, error=ErrorInfo(category, "msg", "d"))
         return job
 
     drm, net, later_ok, on_disk = (make_track(i) for i in ("1", "2", "3", "4"))
-    drm_job = fail(drm, ErrorCategory.DRM_PROTECTED)
+    storage.sync_playlist(PlaylistInfo(playlist_id="pl-w", url="https://soundcloud.com/u/sets/w",
+                                       title="Watah", entries=(drm,)))
+    drm_job = fail(drm, ErrorCategory.DRM_PROTECTED, "pl-w")
     fail(net, ErrorCategory.NETWORK)                          # retry instead
     fail(later_ok, ErrorCategory.DRM_PROTECTED)
     ok = storage.create_download(later_ok)
@@ -171,6 +184,8 @@ def test_failed_tracks_lists_only_unresolved_alternative_failures(storage, make_
                                                                    ("1", drm_job)]
     assert [f.error.category for f in found] == [ErrorCategory.GEO_BLOCKED,
                                                  ErrorCategory.DRM_PROTECTED]
+    assert [(f.playlist_id, f.playlist_title) for f in found] == [(None, None),
+                                                                  ("pl-w", "Watah")]
 
 
 # --- the manual-source download job --------------------------------------------------------
@@ -187,9 +202,11 @@ def test_alternative_source_download_keeps_soundcloud_metadata(
     track = make_track("109665566", title="9k Freestyle", artist="Chris Travis",
                        duration_s=132.748)
     fake_ydl.scripts[VIDEO] = fake_script_cls(info=_youtube_info())
-    _, job = run_one(track, request_kwargs={"audio_source_url": VIDEO})
+    _, job = run_one(track, request_kwargs={"audio_source_url": VIDEO, "playlist_id": "pl-w",
+                                            "playlist_title": "Watah"})
 
     assert job.status == S.COMPLETED and "YouTube" in job.message, job
+    assert fake_finalize.calls[0]["playlist_title"] == "Watah"     # → the playlist's folder
     assert job.audio_source_url == VIDEO
     assert fake_ydl.extract_calls == [VIDEO] and fake_ydl.download_calls == [VIDEO]
     assert fake_ydl.opts[0]["allow_unplayable_formats"] is False
@@ -214,3 +231,33 @@ def test_alternative_source_must_be_a_youtube_video(run_one, make_track, fake_yd
     _, job = run_one(track, request_kwargs={"audio_source_url": "https://evil.example/a.mp3"})
     assert job.status == S.FAILED and job.error.category == ErrorCategory.INVALID_URL
     assert fake_ydl.extract_calls == []
+
+
+def test_alternative_download_lands_in_its_playlist_folder_for_real(
+        storage, settings_store, settings, app_paths, library_dir, fake_ydl, fake_script_cls,
+        make_track, tiny_mp3, wait_until):
+    """Real tagging/organizing: the replacement goes to the failed download's playlist."""
+    from mutagen.id3 import ID3
+
+    from sclm.download.manager import DownloadManager
+    settings_store.update(settings.replace(organize_mode="playlist", embed_artwork=False))
+    track = make_track("109665566", title="9k Freestyle", artist="Chris Travis",
+                       duration_s=132.748)
+    fake_ydl.scripts[VIDEO] = fake_script_cls(info=_youtube_info(),
+                                              payload=tiny_mp3.read_bytes())
+    m = DownloadManager(storage, settings_store, app_paths, ydl_factory=fake_ydl)
+    try:
+        [job] = m.enqueue([DownloadRequest(track, playlist_id="pl-s",
+                                           playlist_title="Smoking 🚬",
+                                           audio_source_url=VIDEO)])
+        wait_until(lambda: m.get_job(job.job_id).status.is_terminal, timeout=10)
+        done = m.get_job(job.job_id)
+    finally:
+        m.shutdown(wait=True, timeout=10)
+    assert done.status == S.COMPLETED, done
+    assert done.final_path.parent == library_dir / "Smoking 🚬"
+    tags = ID3(done.final_path)
+    assert str(tags["TIT2"]) == "9k Freestyle" and str(tags["TPE1"]) == "Chris Travis"
+    assert VIDEO in str(tags.getall("COMM")[0])
+    [record] = storage.download_history(limit=1)
+    assert record.playlist_id == "pl-s"                 # history keeps the playlist too

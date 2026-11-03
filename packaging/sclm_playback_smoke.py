@@ -301,12 +301,20 @@ def run(network: bool = False, screenshot_dir: str | None = None) -> int:
                     for r in range(alt.candidate_model.rowCount())]
             until(lambda: all(u in alt.candidate_model.checks for u in urls), 120000,
                   "candidate format checks")
-            ok = [u for u in urls if alt.candidate_model.checks[u].downloadable]
-            assert ok, "no downloadable candidate"
+            from sclm.download.alternatives import Availability
+            checks = [alt.candidate_model.checks[u] for u in urls]
+            ok = [c for c in checks if c.downloadable]
             first = alt.candidate_model.row_at(0)
-            say(f"PASS alternatives: {len(urls)} YouTube candidates, {len(ok)} downloadable; "
-                f"first {first.match.value} (Δ {first.delta_s:+.1f} s) "
-                f"{alt.candidate_model.checks[first.url].note}; nothing downloaded")
+            if ok:
+                say(f"PASS alternatives: {len(urls)} YouTube candidates, {len(ok)} "
+                    f"downloadable; first {first.match.value} (Δ {first.delta_s:+.1f} s) "
+                    f"{alt.candidate_model.checks[first.url].note}; nothing downloaded")
+            elif all(c.availability == Availability.UNCHECKED for c in checks):
+                say(f"SKIP alternatives checks: YouTube is rate-limiting this connection "
+                    f"({len(urls)} candidates found, none could be checked)")
+            else:
+                raise AssertionError("no downloadable candidate: "
+                                     + "; ".join(c.note for c in checks))
             shot(window, "5-alternatives")
     except AssertionError as exc:
         failures += 1

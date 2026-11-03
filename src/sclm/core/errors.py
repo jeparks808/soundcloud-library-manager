@@ -167,6 +167,18 @@ class StorageError(SclmError):
     default_message = "The library database could not be accessed."
 
 
+def stored_error_info(category: ErrorCategory, message: str, detail: str) -> ErrorInfo:
+    """An ``ErrorInfo`` read back from the database, with legacy rows filed correctly.
+
+    Before 0.3.2, DRM failures (yt-dlp: "This video is DRM protected") were stored as
+    ``auth_required`` with a "typically SoundCloud Go+" message, which suggested signing in
+    would help. They are reported as ``drm_protected`` now; the row itself is not changed.
+    """
+    if category == ErrorCategory.AUTH_REQUIRED and "This video is DRM protected" in detail:
+        return ErrorInfo(ErrorCategory.DRM_PROTECTED, DrmProtectedError.default_message, detail)
+    return ErrorInfo(category, message, detail)
+
+
 def error_info_from_exception(exc: BaseException) -> ErrorInfo:
     """Convert any exception into an :class:`ErrorInfo` (never raises)."""
     if isinstance(exc, SclmError):

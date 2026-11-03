@@ -10,17 +10,20 @@ nothing is downloaded until the user confirms.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from collections.abc import Callable
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QPersistentModelIndex, Qt, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QTableView,
     QVBoxLayout,
@@ -29,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from sclm.context import AppContext
 from sclm.core.errors import ErrorCategory, ErrorInfo
-from sclm.core.models import DownloadRequest
+from sclm.core.models import DownloadRequest, JobStatus, ProgressEvent
 from sclm.download.alternatives import (
     Availability,
     Candidate,
@@ -38,13 +41,15 @@ from sclm.download.alternatives import (
     SourceCheck,
     check_source,
     failed_tracks,
+    friendly_error,
     is_youtube_video_url,
     search_query,
     search_youtube,
 )
 from sclm.gui import theme
 from sclm.gui.bridge import run_in_background
-from sclm.gui.common import format_duration, set_primary, set_role
+from sclm.gui.common import STATUS_LABELS, format_duration, set_primary, set_role
+from sclm.metadata.organizer import plan_folder
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +63,7 @@ INTRO = (
 
 REASONS = {
     ErrorCategory.DRM_PROTECTED: "DRM-protected",
-    ErrorCategory.AUTH_REQUIRED: "Sign-in / Go+",
+    ErrorCategory.AUTH_REQUIRED: "Sign-in needed",
     ErrorCategory.UNAVAILABLE: "Unavailable",
     ErrorCategory.GEO_BLOCKED: "Not in your region",
 }
@@ -67,10 +72,35 @@ MATCH_LABELS = {MatchLevel.MATCH: "Same length", MatchLevel.CLOSE: "Close",
 MATCH_COLORS = {MatchLevel.MATCH: theme.SUCCESS, MatchLevel.CLOSE: theme.WARNING,
                 MatchLevel.DIFFERENT: theme.DANGER, MatchLevel.UNKNOWN: theme.TEXT_MUTED}
 
-F_ARTIST, F_TITLE, F_LENGTH, F_REASON = range(4)
-_F_HEADERS = ("Artist", "Title", "Length", "Reason")
+F_ARTIST, F_TITLE, F_PLAYLIST, F_LENGTH, F_REASON = range(5)
+_F_HEADERS = ("Artist", "Title", "Playlist", "Length", "Reason")
+ALL_PLAYLISTS = "All playlists"
+NO_PLAYLIST = "No playlist (single tracks)"
 C_TITLE, C_CHANNEL, C_LENGTH, C_DELTA, C_MATCH, C_VIEWS, C_SOURCE = range(7)
 _C_HEADERS = ("YouTube video", "Channel", "Length", "Δ", "Match", "Views", "Audio")
+
+
+@dataclass(slots=True)
+class _Download:
+    """The alternative-source job started from this page for one track."""
+
+    job_id: int
+    url: str
+    title: str                      # the candidate's title, for the progress label
+    status: JobStatus = JobStatus.QUEUED
+    fraction: float | None = None
+    message: str = ""
+
+
+def progress_text(d: _Download) -> str:
+    if d.status == JobStatus.DOWNLOADING and d.fraction is not None:
+        return f"Downloading “{d.title}”: {round(d.fraction * 100)}%"
+    if d.status == JobStatus.COMPLETED:
+        return f"Downloaded “{d.title}”."
+    if d.status in (JobStatus.FAILED, JobStatus.CANCELLED):
+        return f"{STATUS_LABELS[d.status]}: {d.message}" if d.message \
+            else STATUS_LABELS[d.status]
+    return f"{STATUS_LABELS[d.status]} “{d.title}”…"
 
 
 def availability_label(check: SourceCheck | None) -> str:
@@ -80,14 +110,16 @@ def availability_label(check: SourceCheck | None) -> str:
         return f"OK · {check.note}" if check.note else "OK"
     if check.availability == Availability.DRM_ONLY:
         return "DRM only — can't download"
+    if check.availability == Availability.UNCHECKED:
+        return "Couldn't check — Search again"
     return f"Unavailable: {check.note}" if check.note else "Unavailable"
 
 
 def _availability_color(check: SourceCheck | None) -> str:
     if check is None:
         return theme.TEXT_MUTED
-    return {Availability.AUDIO: theme.SUCCESS, Availability.DRM_ONLY: theme.DANGER}.get(
-        check.availability, theme.TEXT_MUTED)
+    return {Availability.AUDIO: theme.SUCCESS, Availability.DRM_ONLY: theme.DANGER,
+            Availability.UNCHECKED: theme.WARNING}.get(check.availability, theme.TEXT_MUTED)
 
 
 def _delta(delta_s: float | None) -> str:
@@ -145,11 +177,19 @@ class FailedModel(_Model):
                 return item.track.artist
             if col == F_TITLE:
                 return item.track.title
+            if col == F_PLAYLIST:
+                return item.playlist_title or ""
             if col == F_LENGTH:
                 return format_duration(item.track.duration_s)
+            if item.error.category == ErrorCategory.AUTH_REQUIRED \
+                    and "preview" in item.error.detail:
+                return "Go+ (preview only)"
             return REASONS.get(item.error.category, item.error.category.value)
         if role == Qt.ItemDataRole.ToolTipRole and col == F_REASON:
             return item.error.user_message
+        if role == Qt.ItemDataRole.ToolTipRole and col == F_PLAYLIST:
+            return (f"Downloaded from the playlist “{item.playlist_title}”; the MP3 goes to "
+                    "the same folder" if item.playlist_title else "Not from a playlist")
         if role == Qt.ItemDataRole.TextAlignmentRole and col == F_LENGTH:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
@@ -162,8 +202,11 @@ class CandidateModel(_Model):
         super().__init__(parent)
         self.checks: dict[str, SourceCheck] = {}      # by video URL; shared across tracks
 
-    def set_check(self, url: str, check: SourceCheck) -> None:
-        self.checks[url] = check
+    def set_check(self, url: str, check: SourceCheck | None) -> None:
+        if check is None:
+            self.checks.pop(url, None)          # shown as "Checking…" again
+        else:
+            self.checks[url] = check
         for row, cand in enumerate(self._rows):
             if cand.url == url:
                 idx = self.index(row, C_SOURCE)
@@ -199,7 +242,8 @@ class CandidateModel(_Model):
             if col == C_DELTA:
                 return "YouTube length minus SoundCloud length"
             if col == C_SOURCE:
-                return availability_label(check)
+                return check.note if check is not None and check.note else \
+                    availability_label(check)
         if role == Qt.ItemDataRole.TextAlignmentRole and col in (C_LENGTH, C_DELTA, C_VIEWS):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
@@ -250,7 +294,8 @@ class AlternativesView(QWidget):
         self._searches: dict[str, tuple[str, list[Candidate]]] = {}   # track_id → (query, results)
         self._searching: set[str] = set()
         self._checking: set[str] = set()
-        self._queued: set[str] = set()                                 # track_ids
+        self._downloads: dict[str, _Download] = {}                      # by track_id
+        self._all: list[FailedTrack] = []
         self._tasks: list = []
         self._loading = False
         self.failed_model = FailedModel(self)
@@ -267,15 +312,24 @@ class AlternativesView(QWidget):
         self.listen_btn.setAccessibleName("Listen to the selected failed track on SoundCloud")
         self.listen_btn.setEnabled(False)
         self.listen_btn.clicked.connect(self._listen)
+        self.playlist_filter = QComboBox()
+        self.playlist_filter.setAccessibleName("Show failed downloads from playlist")
+        self.playlist_filter.setMinimumContentsLength(18)
+        self.playlist_filter.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+        self.playlist_filter.addItem(ALL_PLAYLISTS)
+        self.playlist_filter.currentIndexChanged.connect(self._apply_filter)
         top = QHBoxLayout()
         top.addWidget(set_role(QLabel("Failed downloads"), "heading"))
         top.addWidget(self.count_label)
         top.addStretch(1)
+        top.addWidget(self.playlist_filter)
         top.addWidget(self.listen_btn)
         top.addWidget(self.refresh_btn)
 
         self.failed_table = _table(self.failed_model, "Failed downloads")
-        _widths(self.failed_table, (F_ARTIST, F_TITLE), {F_LENGTH: 70, F_REASON: 150})
+        _widths(self.failed_table, (F_ARTIST, F_TITLE, F_PLAYLIST),
+                {F_LENGTH: 70, F_REASON: 150})
         self.failed_table.selectionModel().selectionChanged.connect(self._track_selected)
 
         self.query = QLineEdit()
@@ -307,6 +361,21 @@ class AlternativesView(QWidget):
         self.download_btn.setEnabled(False)
         set_primary(self.download_btn)
         self.download_btn.clicked.connect(self.download)
+        self.progress = QProgressBar()
+        self.progress.setAccessibleName("Download progress of the chosen video")
+        self.progress.setRange(0, 100)
+        self.progress.setTextVisible(False)
+        self.progress.setFixedHeight(6)
+        self.progress_label = QLabel("")
+        self.progress_label.setAccessibleName("Download progress")
+        self.progress_label.setWordWrap(True)
+        progress_row = QVBoxLayout()
+        progress_row.setSpacing(4)
+        progress_row.addWidget(self.progress_label)
+        progress_row.addWidget(self.progress)
+        self.progress.hide()
+        self.progress_label.hide()
+
         bottom = QHBoxLayout()
         bottom.addWidget(self.status, 1)
         bottom.addWidget(self.open_btn)
@@ -322,9 +391,11 @@ class AlternativesView(QWidget):
         layout.addWidget(set_role(QLabel("YouTube candidates"), "heading"))
         layout.addLayout(search_row)
         layout.addWidget(self.candidate_table, 2)
+        layout.addLayout(progress_row)
         layout.addLayout(bottom)
 
         ctx.bridge.job_changed.connect(self._on_job_changed)
+        ctx.bridge.progress.connect(self._on_progress)
 
     # --- background helper ---------------------------------------------------------------
 
@@ -354,10 +425,32 @@ class AlternativesView(QWidget):
         self._run(self._load_fn, done, failed)
 
     def _set_failed(self, items: list[FailedTrack]) -> None:
+        self._all = list(items)
+        current = self.playlist_filter.currentText()
+        names = sorted({i.playlist_title for i in items if i.playlist_title}, key=str.casefold)
+        if any(not i.playlist_title for i in items):
+            names.append(NO_PLAYLIST)
+        self.playlist_filter.blockSignals(True)
+        self.playlist_filter.clear()
+        self.playlist_filter.addItems([ALL_PLAYLISTS, *names])
+        self.playlist_filter.setCurrentText(current if current in names else ALL_PLAYLISTS)
+        self.playlist_filter.blockSignals(False)
+        self._apply_filter()
+
+    def _apply_filter(self, *_args: object) -> None:
+        choice = self.playlist_filter.currentText()
+        if choice == NO_PLAYLIST:
+            items = [i for i in self._all if not i.playlist_title]
+        elif choice and choice != ALL_PLAYLISTS:
+            items = [i for i in self._all if i.playlist_title == choice]
+        else:
+            items = self._all
         selected = self.selected_failed()
         keep = selected.track.track_id if selected else None
         self.failed_model.set_rows(items)
-        self.count_label.setText(f"{len(items)} track(s)" if items else "none")
+        shown = f"{len(items)} of {len(self._all)}" if len(items) != len(self._all) \
+            else str(len(items))
+        self.count_label.setText(f"{shown} track(s)" if self._all else "none")
         for row, item in enumerate(items):
             if item.track.track_id == keep:
                 self.failed_table.selectRow(row)
@@ -420,7 +513,7 @@ class AlternativesView(QWidget):
             current = self.selected_failed()
             if current is not None and current.track.track_id == track_id:
                 self.search_btn.setEnabled(True)
-                self.status.setText(f"YouTube search failed: {info.user_message}")
+                self.status.setText(f"YouTube search failed: {friendly_error(info)}")
 
         self._run(lambda: self._search_fn(query, reference), done, failed)
 
@@ -438,9 +531,13 @@ class AlternativesView(QWidget):
         self._update_buttons()
 
     def _check(self, url: str) -> None:
-        if url in self.candidate_model.checks or url in self._checking:
-            return
+        known = self.candidate_model.checks.get(url)
+        if url in self._checking or (known is not None
+                                     and known.availability != Availability.UNCHECKED):
+            return                     # a definite answer is kept; "couldn't check" is retried
         self._checking.add(url)
+        if known is not None:
+            self.candidate_model.set_check(url, None)
 
         def done(check: SourceCheck) -> None:
             self._checking.discard(url)
@@ -450,7 +547,7 @@ class AlternativesView(QWidget):
         def failed(info: ErrorInfo) -> None:
             self._checking.discard(url)
             self.candidate_model.set_check(
-                url, SourceCheck(Availability.UNAVAILABLE, info.user_message))
+                url, SourceCheck(Availability.UNCHECKED, friendly_error(info)))
             self._update_buttons()
 
         self._run(lambda: self._check_fn(url), done, failed)
@@ -466,7 +563,8 @@ class AlternativesView(QWidget):
         item = self.selected_failed()
         check = self.candidate_model.checks.get(cand.url) if cand else None
         self.open_btn.setEnabled(cand is not None)
-        queued = item is not None and item.track.track_id in self._queued
+        active = self._downloads.get(item.track.track_id) if item is not None else None
+        queued = active is not None and not active.status.is_terminal
         self.download_btn.setEnabled(bool(cand and item and check and check.downloadable)
                                      and not queued)
         if cand is not None and check is not None and not check.downloadable:
@@ -475,6 +573,31 @@ class AlternativesView(QWidget):
             self.download_btn.setToolTip("This track is already in the download queue")
         else:
             self.download_btn.setToolTip("")
+        self._show_progress()
+
+    def _show_progress(self) -> None:
+        """Progress of the download started for the selected track (hidden if none)."""
+        item = self.selected_failed()
+        d = self._downloads.get(item.track.track_id) if item is not None else None
+        self.progress.setVisible(d is not None)
+        self.progress_label.setVisible(d is not None)
+        if d is None:
+            return
+        self.progress_label.setText(progress_text(d))
+        if d.status == JobStatus.COMPLETED:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(100)
+        elif d.status.is_terminal:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(0)
+        elif d.status == JobStatus.DOWNLOADING and d.fraction is not None:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(round(max(0.0, min(1.0, d.fraction)) * 100))
+        elif d.status == JobStatus.QUEUED:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(0)
+        else:                                   # resolving, converting, tagging: busy
+            self.progress.setRange(0, 0)
 
     def open_video(self) -> None:
         cand = self.selected_candidate()
@@ -486,12 +609,21 @@ class AlternativesView(QWidget):
         if item is not None and item.track.url:
             self.listen_requested.emit(item.track.url)
 
+    def destination(self, item: FailedTrack) -> str:
+        """The folder the MP3 will go to (same rules as every download)."""
+        try:
+            return str(plan_folder(self._ctx.settings.get(), item.track, item.playlist_title))
+        except Exception:      # an unusable setting is reported by the download itself
+            log.debug("Could not plan the destination folder", exc_info=True)
+            return "your library"
+
     def _confirm(self, item: FailedTrack, cand: Candidate, check: SourceCheck) -> bool:
         answer = QMessageBox.question(
             self, "Download from YouTube?",
             f"Use the audio of “{cand.title}” ({cand.channel or 'unknown channel'}, "
             f"{format_duration(cand.duration_s) or 'unknown length'}) for "
             f"{item.track.artist} – {item.track.title}?\n\n"
+            f"Saves to: {self.destination(item)}\n\n"
             f"Source: {check.note or 'audio'}. YouTube audio is lossy and is re-encoded to "
             "MP3, so the quality can be lower than SoundCloud's. The SoundCloud title, artist "
             "and artwork are kept, and the file's comment notes the YouTube source.\n\n"
@@ -509,19 +641,36 @@ class AlternativesView(QWidget):
             return
         if not self._confirm(item, cand, check):
             return
-        jobs = self._ctx.manager.enqueue([DownloadRequest(item.track,
-                                                          audio_source_url=cand.url)])
+        jobs = self._ctx.manager.enqueue([DownloadRequest(
+            item.track, playlist_id=item.playlist_id, playlist_title=item.playlist_title,
+            audio_source_url=cand.url)])
         if jobs:
-            self._queued.add(item.track.track_id)
-            self.message.emit(f"Queued {item.track.title} from YouTube — see Queue")
+            self._downloads[item.track.track_id] = _Download(jobs[0].job_id, cand.url,
+                                                             cand.title)
+            self.message.emit(f"Queued {item.track.title} from YouTube")
         else:
             self.message.emit(f"{item.track.title} is already in the download queue")
         self._update_buttons()
 
+    def _download_for(self, job_id: int) -> _Download | None:
+        return next((d for d in self._downloads.values() if d.job_id == job_id), None)
+
     def _on_job_changed(self, job: object) -> None:
-        status = getattr(job, "status", None)
-        track = getattr(job, "track", None)
-        if status is not None and status.is_terminal and track is not None \
-                and track.track_id in self._queued:
-            self._queued.discard(track.track_id)
-            self._update_buttons()
+        d = self._download_for(getattr(job, "job_id", -1))
+        if d is None:
+            return
+        d.status = job.status
+        d.fraction = job.fraction if job.fraction is not None else d.fraction
+        d.message = job.error.user_message if job.error is not None else job.message
+        if job.status == JobStatus.COMPLETED and job.final_path is not None:
+            self.message.emit(f"Saved {job.track.title} to {job.final_path.parent}")
+        self._update_buttons()
+
+    def _on_progress(self, event: ProgressEvent) -> None:
+        d = self._download_for(event.job_id)
+        if d is None or d.status.is_terminal:     # late event after the final state
+            return
+        d.status = event.status
+        if event.fraction is not None:
+            d.fraction = event.fraction
+        self._show_progress()

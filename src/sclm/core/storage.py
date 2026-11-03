@@ -24,7 +24,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal
 
-from sclm.core.errors import ErrorCategory, ErrorInfo, StorageError
+from sclm.core.errors import ErrorCategory, ErrorInfo, StorageError, stored_error_info
 from sclm.core.models import (
     DownloadRecord,
     JobStatus,
@@ -445,7 +445,8 @@ class Storage:
                 category = ErrorCategory(row["error_category"])
             except ValueError:
                 category = ErrorCategory.UNKNOWN
-            error = ErrorInfo(category, row["error_message"] or "", row["error_detail"] or "")
+            error = stored_error_info(category, row["error_message"] or "",
+                                      row["error_detail"] or "")
         return DownloadRecord(
             id=row["id"], track_id=row["track_id"], playlist_id=row["playlist_id"],
             status=JobStatus(row["status"]), attempts=row["attempts"],
