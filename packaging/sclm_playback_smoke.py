@@ -95,7 +95,8 @@ def run(network: bool = False, screenshot_dir: str | None = None) -> int:
     from sclm.core.ffmpeg import resolve_ffmpeg
     from sclm.download.manager import DownloadManager
     from sclm.gui.bridge import DownloadBridge
-    from sclm.gui.main_window import PAGE_DOWNLOAD, PAGE_LIBRARY, PAGE_LISTEN, MainWindow
+    from sclm.gui.main_window import (PAGE_ALTERNATIVES, PAGE_DOWNLOAD, PAGE_LIBRARY,
+                                      PAGE_LISTEN, MainWindow)
     from sclm.gui.theme import apply_theme
 
     apply_theme(app)
@@ -155,6 +156,15 @@ def run(network: bool = False, screenshot_dir: str | None = None) -> int:
                         ("Smoke tone B", songs[1])):
         core.storage.add_library_file(LibraryFile(path=path, source=LibrarySource.SCAN,
                                                   artist="SCLM", title=title))
+    # One DRM failure for the Alternatives page (a public track; nothing is downloaded).
+    from sclm.core.errors import ErrorCategory, ErrorInfo
+    from sclm.core.models import JobStatus, TrackInfo
+    drm_track = TrackInfo(track_id="109665566", title="9k Freestyle", artist="Chris Travis",
+                          url="https://soundcloud.com/christravis/chris-travis-9k-freestyle",
+                          duration_s=132.748)
+    core.storage.update_download(core.storage.create_download(drm_track),
+                                 status=JobStatus.FAILED,
+                                 error=ErrorInfo(ErrorCategory.DRM_PROTECTED, "DRM", "smoke"))
     window = MainWindow(AppContext(core.paths, core.settings, core.storage, manager, bridge))
     window.resize(1280, 800)
     window.show()
@@ -279,6 +289,25 @@ def run(network: bool = False, screenshot_dir: str | None = None) -> int:
         listen.stop()
         until(lambda: bool(exited), 5000, "player process exit")
         say("PASS web: Stop listening ended the player process")
+
+        # --- alternatives page -------------------------------------------------------------
+        alt = window.alternatives_view
+        window.show_page(PAGE_ALTERNATIVES)
+        until(lambda: alt.failed_model.rowCount() == 1, 10000, "failed downloads listed")
+        say("PASS alternatives: failed DRM download listed under Listen")
+        if network:
+            until(lambda: alt.candidate_model.rowCount() > 0, 60000, "YouTube candidates")
+            urls = [alt.candidate_model.row_at(r).url
+                    for r in range(alt.candidate_model.rowCount())]
+            until(lambda: all(u in alt.candidate_model.checks for u in urls), 120000,
+                  "candidate format checks")
+            ok = [u for u in urls if alt.candidate_model.checks[u].downloadable]
+            assert ok, "no downloadable candidate"
+            first = alt.candidate_model.row_at(0)
+            say(f"PASS alternatives: {len(urls)} YouTube candidates, {len(ok)} downloadable; "
+                f"first {first.match.value} (Δ {first.delta_s:+.1f} s) "
+                f"{alt.candidate_model.checks[first.url].note}; nothing downloaded")
+            shot(window, "5-alternatives")
     except AssertionError as exc:
         failures += 1
         say(f"FAIL: {exc}")
