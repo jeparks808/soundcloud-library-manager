@@ -317,4 +317,7 @@ The lead confirmed it's gone.
 - Found live: YouTube rate limiting (429, then the bot check) was mislabelled as a
   SoundCloud sign-in. Now classified as a temporary limit; affected checks are retried.
 - Fixed: the 0.4.0 report edit had dropped the "## Limitations" heading.
+- Smoke test: the real Play click is skipped unless the smoke window is the one under
+  the click point (a covered window once risked clicking the user's own app).
+- Live: 9k Freestyle replacement saved to `Smoking 🚬/` with progress 0→100 %.
 - 664 passed, 4 skipped.

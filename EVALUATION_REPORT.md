@@ -290,9 +290,22 @@ required that videos available only DRM-protected be labelled and never download
     - The smoke test reports this case as SKIP.
   - SCLM does not try to get around the limit.
 - **Tests:** 664 passed, 4 skipped.
-- **Not verified live:** a YouTube download with the progress bar, and the actual write
-  into the playlist folder. YouTube was blocking this connection at the time; the real
-  pipeline is covered offline only.
+- **Live check** (after YouTube lifted the limit). Setup: isolated `SCLM_HOME`, a backup
+  copy of the user's database.
+  - Reasons: 123 DRM-protected, 6 "Go+ (preview only)", 1 "Sign-in needed".
+  - Playlist filter: Bass Mix, Dnb, S2pid 8oh8s, Smoking 🚬, Watah, and no playlist.
+  - "9k Freestyle", official verified video:
+    - Saved to `library/Smoking 🚬/Chris Travis - 9k Freestyle.mp3` in 23.2 s.
+    - TALB "Smoking 🚬", SoundCloud title, artist and artwork.
+    - The history row keeps the playlist.
+  - Progress label: 0 % to 100 %, then Converting, Tagging and Downloaded.
+- **Smoke-test safety.**
+  - A 0.4.1 smoke run failed while the user's own windows covered the smoke window. Its
+    real (XTest) Play click could have landed in the user's SCLM window: one click on a
+    table row, which can't download anything.
+  - The smoke test now checks that the window under the click point is its own, and
+    otherwise reports SKIP without clicking (`_owns_point`).
+  - Only the uncovered case was exercised (PASS). The SKIP branch was reviewed, not run.
 
 ## Limitations
 
