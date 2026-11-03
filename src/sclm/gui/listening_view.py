@@ -3,7 +3,7 @@
 The engine starts lazily on first use and keeps running (and playing) while other pages
 are shown. Download services never receive the website's sign-in.
 """
-from PySide6.QtCore import QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QFrame,
@@ -19,8 +19,8 @@ from sclm.gui.common import set_role
 from sclm.gui.listening_policy import HOME, valid_url
 
 PLAYBACK_ERROR_TEXT = (
-    "SoundCloud couldn't play this track in the built-in player. Protected content (for "
-    "example some SoundCloud Go+ tracks) may need a browser with DRM support.")
+    "SoundCloud couldn't play this track in the built-in player. SoundCloud Go+ tracks are "
+    "DRM-protected and play only in a browser with DRM support, such as Firefox.")
 
 
 def create_browser(paths, parent):
@@ -75,12 +75,14 @@ class ListeningView(QWidget):
         layout.addLayout(self.content, 1)
         self.placeholder = QLabel(
             "Listen to SoundCloud here, including tracks you can't download. Sign in on the "
-            "website to use your account and SoundCloud Go+. The sign-in stays on this "
-            "computer and is never used for downloads. Music keeps playing when you switch "
-            "pages.")
+            "website to use your account. The sign-in stays on this computer and is never "
+            "used for downloads. Music keeps playing when you switch pages. SoundCloud Go+ "
+            "tracks are DRM-protected: use Open in browser for those.")
         self.placeholder.setWordWrap(True)
-        self.content.addWidget(self.placeholder)
-        self.content.addStretch(1)
+        self.placeholder.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        # The placeholder takes the spare height itself (no spacer), so the browser view gets
+        # all of it while the placeholder is hidden.
+        self.content.addWidget(self.placeholder, 1)
         self.controls(False)
 
     def button(self, title, callback, layout):

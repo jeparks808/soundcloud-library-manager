@@ -167,6 +167,10 @@ class WebKitBrowser(QObject):
 
     def _embed(self, xid: int) -> None:
         self._window = QWindow.fromWinId(xid)
+        # Qt rewrites the foreign window's X attributes and clears GTK's override-redirect
+        # unless this hint is set; the window manager then sometimes adopted the helper
+        # window as a separate decorated window if it was mapped before the reparent.
+        self._window.setFlags(self._window.flags() | Qt.WindowType.BypassWindowManagerHint)
         self.container = QWidget.createWindowContainer(self._window, self.view)
         self.container.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.container.setAccessibleName("SoundCloud website")

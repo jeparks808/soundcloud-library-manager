@@ -64,13 +64,14 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | Q2 | No DRM/authorization bypass | all | done+tested | Go+ preview-only and DRM formats → AuthRequiredError (network test); cookies only pass the user's own login |
 
 | L1 | Official SoundCloud Listen page + Queue/History links | 0.2→0.3 | done+tested | engine replaced by WebKitGTK helper (0.3.0); tests/gui/test_listening.py (protocol with fake helper, unavailable engine, signals); AppImage playback smoke: embedded page loads |
-| L2 | Independent persistent website login/profile | 0.3.0 | partial | profile `listening-webkit/` (0700, persistent cookies) created and reused by the helper; real account sign-in not yet done by the user |
+| L2 | Independent persistent website login/profile | 0.3.0 | done+tested, manual | profile `listening-webkit/` (0700, persistent cookies) created and reused by the helper; user signed in and played their likes (screenshots) |
 | L3 | Real SoundCloud playback in the app, continuing on other pages | 0.3.0 | done+tested | AppImage `--playback-smoke --network`: public AAC track plays (is-playing-audio), same process after page switch; audible capture −22 dBFS on the real sink |
-| L4 | Go+ / protected streaming inside the app | 0.3.0 | untested (limited engine) | no Widevine in WebKitGTK; error banner + "Open this track in my browser" (banner logic tested offline); real Go+ track needs the user's account |
+| L4 | Go+ / protected streaming inside the app | 0.3.1 | unsupported (DRM) — handed to Firefox | user confirmed Go+ fails in-app; WebKitGTK has no EME (probe); Go+ = SUB_HIGH_TIER, encrypted for subscribers; see EVALUATION_REPORT 0.3.1 | no Widevine in WebKitGTK; error banner + "Open this track in my browser" (banner logic tested offline); real Go+ track needs the user's account |
 | L5 | Desktop AppImage update / GitHub publication | 0.3.0 | desktop done+tested; publication see EVALUATION_REPORT.md | backup verified; self-test + playback smoke PASS before replacement |
 | P1 | Local player: play/pause/stop, next/previous, seek, elapsed/total, volume/mute | 0.3.0 | done+tested | tests/gui/test_player.py (fake + real QtMultimedia); AppImage playback smoke |
 | P2 | Title/artist/artwork display | 0.3.0 | done+tested | test_real_mp3_seek_and_artwork; smoke checks cover art |
 | P3 | Queue, double-click to play, auto-advance | 0.3.0 | done+tested | test_library_double_click_plays_page_as_queue, end-of-media tests; smoke real double-click |
 | P4 | Missing/unplayable files handled gracefully | 0.3.0 | done+tested | missing reported once and skipped; all-failed stops (unit + real + smoke) |
+| L6 | Listen view fills the page and follows window resizes | 0.3.1 | done+tested | test_browser_view_fills_the_page_height (fails on old layout); real-window probe 1150×611 → 960×471 |
 | P5 | Non-blocking GUI, playback persists across tabs, one audio source at a time | 0.3.0 | done+tested | QtMultimedia threads; smoke page switches; mutual pause local↔web (MPRIS) in smoke and test_web_and_local_playback_pause_each_other |
-| P6 | Local playback audible on the user's desktop | 0.3.0 | tested (automated), manual pending | per-stream capture −35 dBFS on the real sink after the PipeWire role-mute repair; user hearing check pending |
+| P6 | Local playback audible on the user's desktop | 0.3.0 | done+tested, manual (user confirmed) | per-stream capture −35 dBFS on the real sink after the PipeWire role-mute repair; user hearing check pending |

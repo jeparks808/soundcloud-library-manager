@@ -16,8 +16,10 @@ Every SoundCloud track failed in the 0.2.0 Listen page and worked in Firefox bec
   proprietary codecs. In that engine, `MediaSource.isTypeSupported('audio/mp4;
   codecs="mp4a.40.2"')` and `<audio>.canPlayType` both reject AAC. MP3 and Opus are
   accepted, which is why the 0.2.0 MP3 fixture passed.
-- DRM was not the cause for ordinary tracks. The user's Firefox profiles have no Widevine
-  plugin installed, yet those tracks play there.
+- DRM was not the cause for ordinary tracks: their transcodings are plain `hls` AAC
+  (`aac_160k`, `aac_96k`), not SoundCloud's encrypted `ctr-`/`cbc-` protocols. (An earlier
+  version of this report said the user's Firefox had no Widevine; that was wrong — the
+  active profile has Widevine 4.10.3112.0 enabled. It matters for Go+, see below.)
 
 The fix replaces the engine. The distribution's WebKitGTK 2.52.6 (GStreamer `avdec_aac`)
 accepts the AAC type and plays the same tracks.
@@ -103,15 +105,83 @@ Failures found and fixed during testing:
 
 ## Manual checks (user)
 
-- **Local audio after the PipeWire fix:** awaiting the user's confirmation. The audible
-  probe above is automated evidence, not a hearing test.
-- **Signed-in playback and Go+ tracks:** **untested.** This needs the user's account, and
-  no credentials were requested.
-  - Expected: tracks SoundCloud serves as AAC play.
-  - Expected: Widevine-only streams cannot play, because WebKitGTK here has no CDM. They
-    show SoundCloud's error, which triggers the "Open this track in my browser" banner.
+- **Local audio after the PipeWire fix:** confirmed by the user ("playback of the local
+  library is now successful").
+- **Signed-in Listen playback:** confirmed by the user, signed in, with screenshots
+  (likes page playing).
+- **Go+ tracks:** the user reports they do not play in the Listen page. Explained, not
+  fixable in-app (see "Go+ investigation (0.3.1)").
 - **Double-click from the Desktop or menu:** not yet confirmed by the user. The programmatic
   launch of the same file passed.
+
+## 0.3.1: Listen view height and Go+ investigation
+
+**Listen view height (user report: "the scaling for the listen tab is poorly implemented").**
+The web view filled only the top ~300 px of the page. Cause: the page's content layout
+held the browser widget (stretch 1) next to a leftover spacer (stretch 1) for the
+placeholder text, so the browser always got about half the height. GTK was ruled out: an
+override-redirect GTK window followed every external resize in a probe. Fix: the
+placeholder takes the stretch itself and is hidden while the browser is shown.
+
+- New test `test_browser_view_fills_the_page_height`: fails on the old layout (317 px left
+  empty), passes with the fix.
+- Real-window probe with the real WebKit view: 1190×700 page → embedded GTK window
+  1150×611; after resizing to 1000×560 → 960×471. A screenshot shows soundcloud.com filling
+  the page.
+
+**Embedding race (found by the 0.3.1 AppImage smoke test).** In 1 of 5 smoke runs
+(source and AppImage alike), the helper window appeared as a separate, decorated window
+instead of inside the Listen page. The same thing had shown up once in an earlier sizing
+probe.
+
+- Cause: after `QWindow.fromWinId`, Qt rewrote the window's X attributes without
+  override-redirect. `xwininfo` showed GTK's `yes` turned into `no`. A window manager then
+  adopts the window if it is mapped as a top-level before Qt's reparent.
+- Fix: `Qt.BypassWindowManagerHint` on the foreign window, so override-redirect stays `yes`.
+- Keyboard focus was re-checked with XTest: typing reaches SoundCloud's search box, and
+  clicking the address bar returns focus to Qt.
+- The smoke test now asserts that the helper window's X ancestors include the main window,
+  so a window-manager frame fails it immediately.
+
+**Go+ investigation.** The Go+ tracks are DRM-protected and cannot be played in the
+embedded engine without circumventing DRM. The supported workaround is Firefox. Evidence
+(none of it uses the user's sign-in):
+
+- **Anonymous public API**, "Cop a Chicken" (shown with a GO+ badge in the user's library):
+  - `monetization_model=SUB_HIGH_TIER`, `policy=SNIP`
+  - only 30-second MP3 previews are offered (`snipped`)
+  - an ordinary track by comparison: full `hls` AAC transcodings
+- **Subscriber formats:** yt-dlp's SoundCloud extractor treats transcodings whose protocol
+  starts with `ctr-`/`cbc-` (CENC encryption) as DRM and skips them.
+  - The actual subscriber transcoding list was not fetched, since that would require the
+    user's session. The DRM classification of Go+ full streams is therefore inferred from
+    this evidence, not observed directly.
+- **WebKitGTK 2.52.6** (distribution build): `navigator.requestMediaKeySystemAccess` is
+  undefined, so it has no EME and no key system at all (Widevine, FairPlay, PlayReady,
+  ClearKey).
+- **Installed browsers:** Firefox 159 is the only one and is the default browser. Its active
+  profile has Widevine 4.10.3112.0 with `media.eme.enabled=true`.
+
+Options considered:
+
+- **Rejected:**
+  - Adding a CDM to WebKitGTK: no licensed CDM exists for it.
+  - QtWebEngine + Widevine: the wheel also lacks AAC, so it is not viable.
+  - Downloading or decrypting the stream: this would bypass DRM and is forbidden.
+- **Kept:** the existing handoff (**Open in browser**, and the error banner's
+  **Open this track in my browser**).
+- **Changed:** the UI and README now say plainly that Go+ tracks need Firefox, and no
+  longer suggest that Go+ works in the Listen page.
+
+**0.3.1 verification (real runs):**
+
+- `pytest -q`: 629 passed, 4 skipped.
+- 0.3.1 AppImage `--self-test`: PASSED.
+- `--playback-smoke --network`: **6/6 PASS**, including the new X-ancestry embedding
+  check.
+- Desktop AppImage replaced: SHA-256
+  `0f554984a9386616d96904a6a157e6ec7a31e1ad6bb544e4db4c0c9315b41286`. Backup:
+  `dist/desktop-backups/SoundCloud_Library_Manager-0.3.0-*.AppImage`.
 
 ## Limitations
 

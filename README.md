@@ -9,7 +9,7 @@ optional.
 Download only audio you are authorized to download. The app does not bypass DRM or
 SoundCloud access restrictions; unavailable or restricted tracks are reported as errors.
 
-## Features (0.3.0)
+## Features (0.3.x)
 
 | Area | Status |
 |---|---|
@@ -17,7 +17,7 @@ SoundCloud access restrictions; unavailable or restricted tracks are reported as
 | **Local player**: play/pause/stop, previous/next, seek bar, elapsed/total time, volume + mute, title/artist, cover art, play queue, double-click to play, auto-advance, missing/unsupported files reported and skipped, keeps playing on every page | **New, tested** |
 | **Listen page**: the official SoundCloud website (sign in, browse, play) embedded in the app, playing while you use other pages | **Rebuilt, tested with public tracks** |
 | One audio source at a time: starting local playback pauses the website and vice versa | **New, tested** |
-| SoundCloud Go+ in the Listen page | Depends on the track — see below; requires your manual check |
+| SoundCloud Go+ tracks | Not playable in the app (DRM); open in Firefox — see below |
 
 ### Local player
 
@@ -56,13 +56,18 @@ sudo apt install python3-gi gir1.2-webkit2-4.1 gstreamer1.0-libav gstreamer1.0-p
 Without them the Listen page explains what is missing and offers **Open in browser**; the
 rest of the app is unaffected.
 
-**SoundCloud Go+ and protected content.** Neither QtWebEngine nor WebKitGTK here has a
-Widevine DRM module. Tracks that SoundCloud serves as normal AAC streams to signed-in
-subscribers play in the Listen page. If a track is only offered as a DRM-encrypted stream,
-SoundCloud shows "There was a problem playing this track"; the app then shows a banner
-with **Open this track in my browser**, which opens it in your default browser (for
-example Firefox) where your subscription plays it. A subscription does not make protected
-tracks downloadable through this app.
+**SoundCloud Go+ tracks do not play in the Listen page — use Open in browser.** Go+
+tracks (marked GO+) are only offered to subscribers as DRM-encrypted streams (CENC,
+SoundCloud's `ctr-`/`cbc-` transcodings); without a subscription SoundCloud serves a
+30-second preview. Playing them requires a licensed DRM module (Widevine), which only
+browsers such as Firefox and Chrome ship. The distribution's WebKitGTK has no DRM support
+at all (`navigator.requestMediaKeySystemAccess` is undefined), and Widevine cannot be
+added to it legitimately. There is no in-app workaround that would not mean circumventing
+DRM, so the app hands these tracks to your browser: **Open in browser** (or the banner's
+**Open this track in my browser** when SoundCloud reports a playback error) opens the
+current page there, where your subscription plays it. In Firefox, DRM playback must be
+enabled (Settings → General → "Play DRM-controlled content"). A subscription does not
+make protected tracks downloadable through this app.
 
 **Sign-in.** The website sign-in is stored in the app's own profile
 (`~/.local/share/soundcloud-library-manager/listening-webkit/`), separate from the
@@ -80,8 +85,8 @@ Download `SoundCloud_Library_Manager-<version>-x86_64.AppImage` from the GitHub 
 check it against the published SHA-256, make it executable and double-click it:
 
 ```sh
-sha256sum SoundCloud_Library_Manager-0.3.0-x86_64.AppImage
-chmod +x SoundCloud_Library_Manager-0.3.0-x86_64.AppImage
+sha256sum SoundCloud_Library_Manager-0.3.1-x86_64.AppImage
+chmod +x SoundCloud_Library_Manager-0.3.1-x86_64.AppImage
 ```
 
 The AppImage needs FUSE (`fusermount`/`fusermount3`); without it, run it with
