@@ -7,3 +7,23 @@ build/
 dist/
 *.sqlite3-journal
 .claude/settings.local.json
+# Local data, media and session state (never commit)
+*.sqlite3
+*.sqlite3-*
+*.db
+*.mp3
+*.m4a
+*.opus
+*.wav
+*.flac
+*.AppImage
+listening-browser/
+listening-webkit/
+cookies.sqlite
+.env
+*.log
+*.tmp
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/

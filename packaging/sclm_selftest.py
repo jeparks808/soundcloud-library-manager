@@ -15,6 +15,9 @@ Checks:
   qt             offscreen QApplication, theme, app icon (SVG), JPEG/PNG/SVG image plugins
   ffmpeg         bundled imageio-ffmpeg binary runs (-version) and encodes MP3 (libmp3lame);
                  also reports what the default resolver picks (settings -> PATH -> bundled)
+  multimedia     QtMultimedia's FFmpeg backend loads and decodes MP3 (local player)
+  webkit-player  the website-player helper is bundled; WARN if the host lacks WebKitGTK,
+                 PyGObject or the GStreamer AAC decoder (Listen page then offers the browser)
   --network      HTTPS GET via urllib, and a real yt-dlp preview through sclm.download.preview
   --download     yt-dlp download of a ~10 s public test track + MP3 conversion with the
                  bundled ffmpeg, read back with mutagen
@@ -211,6 +214,65 @@ def _ffmpeg(tmp: Path) -> str:
             f"default resolver picks {default.source}: {default.path}")
 
 
+def _multimedia(tmp: Path) -> str:
+    """Decode a generated MP3 with QtMultimedia's FFmpeg backend (no audio device needed)."""
+    import subprocess
+
+    from PySide6.QtCore import QEventLoop, QTimer, QUrl
+    from PySide6.QtMultimedia import QAudioDecoder
+    from PySide6.QtWidgets import QApplication
+
+    from sclm.core.ffmpeg import resolve_ffmpeg
+
+    app = QApplication.instance() or QApplication(["sclm-selftest"])
+    mp3 = tmp / "decode.mp3"
+    subprocess.run([str(resolve_ffmpeg(None).path), "-v", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=440:duration=1", "-c:a", "libmp3lame", str(mp3)],
+                   check=True, timeout=30)
+    decoder = QAudioDecoder()
+    frames, errors = [0], []
+    loop = QEventLoop()
+
+    def ready() -> None:
+        frames[0] += decoder.read().frameCount()
+
+    decoder.bufferReady.connect(ready)
+    decoder.finished.connect(loop.quit)
+    decoder.error.connect(lambda *_: (errors.append(decoder.errorString()), loop.quit()))
+    decoder.setSource(QUrl.fromLocalFile(str(mp3)))
+    decoder.start()
+    QTimer.singleShot(10000, loop.quit)
+    loop.exec()
+    del app
+    if errors or frames[0] < 40000:
+        raise RuntimeError(f"MP3 decode failed: {errors or frames[0]} frames")
+    return f"QtMultimedia (FFmpeg backend) decoded a 1 s MP3: {frames[0]} frames"
+
+
+def _webkit_player() -> str:
+    import subprocess
+
+    from sclm.gui.listening_browser import HELPER, system_python
+
+    if not HELPER.is_file():
+        raise FileNotFoundError(HELPER)
+    python = system_python()
+    if python is None:
+        raise RuntimeError("no system python3")
+    probe = ("import gi; gi.require_version('Gtk','3.0'); gi.require_version('WebKit2','4.1');"
+             "gi.require_version('Gst','1.0'); from gi.repository import WebKit2, Gst; "
+             "Gst.init(None); assert Gst.ElementFactory.find('avdec_aac') or "
+             "Gst.ElementFactory.find('fdkaacdec'), 'no GStreamer AAC decoder'; "
+             "print(WebKit2.get_major_version(), WebKit2.get_minor_version(), "
+             "WebKit2.get_micro_version())")
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "QT_"))}
+    out = subprocess.run([python, "-I", "-c", probe], capture_output=True, text=True,
+                         timeout=30, env=env)
+    if out.returncode:
+        raise RuntimeError((out.stderr.strip().splitlines() or ["failed"])[-1])
+    return f"helper {HELPER.name}; host {python}: WebKitGTK {'.'.join(out.stdout.split())}"
+
+
 def _https() -> str:
     import urllib.request
 
@@ -279,6 +341,8 @@ def run(*, network: bool = False, download: bool = False) -> int:
         _check("xcb-cursor", _xcb_cursor)
         _check("qt", _qt)
         _check("ffmpeg", lambda: _ffmpeg(tmp))
+        _check("multimedia", lambda: _multimedia(tmp))
+        _check("webkit-player (host)", _webkit_player, optional=True)
         _check("beets (optional)", lambda: _beets(tmp), optional=True)
         if network or download:
             _check("network-https", _https)

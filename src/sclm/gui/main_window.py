@@ -25,21 +25,24 @@ from sclm import APP_DISPLAY_NAME, __version__
 from sclm.context import AppContext
 from sclm.gui import theme
 from sclm.gui.history_view import HistoryView
+from sclm.gui.listening_view import ListeningView
 from sclm.gui.library_view import LibraryView
+from sclm.gui.player import PlayerBar, PlayerController
 from sclm.gui.preview_panel import PreviewPanel
 from sclm.gui.queue_view import QueueView
 from sclm.gui.settings_dialog import SettingsDialog
 
 log = logging.getLogger(__name__)
 
-PAGE_DOWNLOAD, PAGE_QUEUE, PAGE_LIBRARY, PAGE_HISTORY = range(4)
-PAGE_NAMES = ("Download", "Queue", "Library", "History")
+PAGE_DOWNLOAD, PAGE_QUEUE, PAGE_LIBRARY, PAGE_HISTORY, PAGE_LISTEN = range(5)
+PAGE_NAMES = ("Download", "Queue", "Library", "History", "Listen")
 REFRESH_DEBOUNCE_MS = 800
 STATUS_MESSAGE_MS = 6000
 
 
 class MainWindow(QMainWindow):
-    """Top-level window: Download / Queue / Library / History pages and Settings.
+    """Top-level window: Download / Queue / Library / History / Listen pages, the local
+    player bar, and Settings.
 
     Receives everything through ``ctx``; constructs no services itself. The queue view
     connects ``ctx.bridge`` signals to its model. On close, asks for confirmation if
@@ -61,8 +64,13 @@ class MainWindow(QMainWindow):
         self.queue_view = QueueView(ctx)
         self.library_view = LibraryView(ctx)
         self.history_view = HistoryView(ctx)
+        self.listening_view = ListeningView(ctx.paths)
+        self.player = PlayerController(self)
+        self.player_bar = PlayerBar(self.player)
+        self.queue_view.listen_requested.connect(self.listen)
+        self.history_view.listen_requested.connect(self.listen)
         self.stack = QStackedWidget()
-        for page in (self.preview_panel, self.queue_view, self.library_view, self.history_view):
+        for page in (self.preview_panel, self.queue_view, self.library_view, self.history_view, self.listening_view):
             self.stack.addWidget(page)
 
         # --- navigation ---
@@ -96,11 +104,16 @@ class MainWindow(QMainWindow):
         nav_layout.addLayout(side)
 
         central = QWidget()
-        row = QHBoxLayout(central)
+        column = QVBoxLayout(central)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(0)
+        row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
         row.addWidget(nav_frame)
         row.addWidget(self.stack, 1)
+        column.addLayout(row, 1)
+        column.addWidget(self.player_bar)
         self.setCentralWidget(central)
 
         # --- status bar ---
@@ -122,6 +135,15 @@ class MainWindow(QMainWindow):
             view.message.connect(self.show_message)
         self.preview_panel.enqueued.connect(self._on_enqueued)
         self.library_view.library_changed.connect(self.update_library_count)
+        self.library_view.play_requested.connect(self.player.play_files)
+        self.library_view.enqueue_requested.connect(self._enqueue)
+        self.player.message.connect(self.show_message)
+        # One audio source at a time: each player pauses the other (no session is closed).
+        self.player.playing_changed.connect(
+            lambda playing: self.listening_view.pause_web() if playing else None)
+        self.listening_view.web_audio_changed.connect(
+            lambda playing: self.player.pause() if playing else None)
+        self.player_bar.install_shortcuts(self)
 
         self._refresh_timer = QTimer(self)
         self._refresh_timer.setSingleShot(True)
@@ -219,6 +241,15 @@ class MainWindow(QMainWindow):
     def show_page(self, page: int) -> None:
         self.nav.setCurrentRow(page)
 
+    def listen(self, url: str) -> None:
+        self.listening_view.open_url(url)
+        self.show_page(PAGE_LISTEN)
+
+    def _enqueue(self, files: list) -> None:
+        added = self.player.enqueue(files)
+        if added:
+            self.show_message(f"Added {added} track(s) to the play queue")
+
     def current_page(self) -> int:
         return self.stack.currentIndex()
 
@@ -231,6 +262,8 @@ class MainWindow(QMainWindow):
             return
         self.stack.setCurrentIndex(row)
         self._refresh_page(row)
+        if row == PAGE_LISTEN:
+            self.listening_view.activate()
 
     def _refresh_page(self, row: int) -> None:
         if row == PAGE_LIBRARY:
@@ -327,4 +360,10 @@ class MainWindow(QMainWindow):
             self._qsettings().setValue("window/geometry", self.saveGeometry())
         except Exception:
             log.debug("Could not save window geometry", exc_info=True)
+        self.shutdown_players()
         event.accept()
+
+    def shutdown_players(self) -> None:
+        """Stop local audio and the website player process (idempotent)."""
+        self.player.shutdown()
+        self.listening_view.shutdown()

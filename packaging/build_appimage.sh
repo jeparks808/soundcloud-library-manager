@@ -56,7 +56,7 @@ if ! "$PY" -c "import PyInstaller" 2>/dev/null; then
   log "Installing $PYI_PIN into $VENV"
   "$PY" -m pip install -q "$PYI_PIN"
 fi
-"$PY" -c "import PySide6, yt_dlp, mutagen, imageio_ffmpeg, certifi" \
+"$PY" -c "import PySide6.QtMultimedia, yt_dlp, mutagen, imageio_ffmpeg, certifi" \
   || die "runtime dependencies missing in $VENV (pip install -r requirements.txt)"
 "$PY" -c "import beets" 2>/dev/null \
   || echo "note: beets is not installed in the venv; the AppImage will run without the optional beets step"

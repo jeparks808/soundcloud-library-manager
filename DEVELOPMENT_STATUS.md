@@ -2,7 +2,7 @@
 
 _Last updated: 2026-11-02_
 
-## Environment (verified)
+## Original build environment (historical; see the 0.2.0 update below)
 
 | Item | Value |
 |---|---|
@@ -17,9 +17,9 @@ _Last updated: 2026-11-02_
 | Display | X11 (`DISPLAY=:0`) |
 | Coding agent | Claude Code 2.1.316 (the active platform). Codex CLI 0.166.0 is installed but not running |
 
-## Model / effort orchestration
+## Original build model / effort orchestration (historical)
 
-### Claude Code (active platform)
+### Claude Code (original build platform)
 
 Project-local subagents are in `.claude/agents/*.md` with explicit `model:` and `effort:` frontmatter.
 The Agent tool's model choices here are the aliases `opus`, `sonnet`, `haiku` and `fable`. In this
@@ -46,7 +46,7 @@ session on, the named agents (`sclm-architect`, etc.) can be used directly.
 below. Claude Code doesn't report a subagent's effective model or effort back to the parent
 session, so per-run verification is limited to the configuration that was requested.
 
-### Codex (not active)
+### Codex (portable definitions during the original build)
 
 `.codex/agents/*.toml` defines the requested Codex configuration (gpt-6-astra / gpt-6.1-sol with
 `model_reasoning_effort`). It was **not verified**: Codex isn't the running platform, and the
@@ -174,3 +174,90 @@ The lead confirmed it's gone.
 - **Placed:** copied to `~/Desktop/SoundCloud_Library_Manager.AppImage` (chmod +x, gio trusted; nothing was overwritten — the name
   was free). Mint menu entry `~/.local/share/applications/sclm.desktop` now launches the AppImage (was: venv python).
 - **Pending user verification:** double-click launch from the Desktop and the menu on the real display.
+
+
+### 0.2.0 desktop listening integration (2026-11-02, Codex continuation)
+
+- Scope explicitly corrected by the user: update `/home/john/soundcloud-library-manager`,
+  the source verified against the Desktop AppImage and uploaded to
+  `jeparks808/soundcloud-library-manager`. Preserve the original architecture/history.
+- Implemented lazy **Listen** page, official website sign-in profile, Queue/History
+  listen buttons, HTTPS navigation restrictions, visible identity-provider address,
+  external fallback, stop/reopen and orderly browser/profile disposal. Download services
+  and user music/history are unchanged. Version bumped to 0.2.0; full PySide6 dependency.
+- Packaging now retains WebEngineProcess, resource packs, English locale, GLX/EGL plugins
+  and dynamically loaded NSS modules. Added isolated `--browser-smoke [--network]`.
+- Requested GUI agent: `gpt-6.1-sol/high`; it hit the usage limit. The root session finished
+  implementation and disclosed the limitation. Requested independent review agent:
+  `gpt-6-astra/high`, accepted by the collaboration tool and completed read-only review.
+  Spawn parameters are observable; no independent backend model/effort attestation is
+  exposed. No model switch is claimed for the root continuation.
+- Review found missing dynamically loaded NSS modules and stale address display during
+  main-frame provider login; both corrected. Reviewer ran 22 listening tests: passed.
+- Actual validation so far: baseline 592 passed/4 skipped; new listening tests22 passed;
+  integrated full suite614 passed/4 skipped (30.03 s); after identity-display fix23 focused
+  tests passed. Four network pytest tests are opt-in and were skipped in these commands.
+- Real-display source browser smoke passed: generated muted MP3 decoded/time advanced;
+  official homepage rendered; popup/profile closed without warnings. Screenshot inspected
+  at1360×850. First fixture attempt failed because its view was hidden; corrected the
+  fixture to display its view before asserting playback.
+- First AppImage `--self-test --network`: all10 checks passed (FFmpeg encode, HTTPS,
+  live yt-dlp preview included). Browser smoke exposed missing XCB OpenGL plugins and a
+  stale hidden-view fixture. First build completed in144 s (180 MiB); second intermediate
+  build was intentionally stopped after the review identified NSS pruning.
+- Final rebuild and desktop placement results will be recorded below. No GitHub push:
+  user explicitly requires successful personal testing before publication.
+- Limits: this wheel reports MP3 supported and AAC unsupported; no bundled Widevine.
+  SoundCloud account login, Go+ tracks, audible playback and manual desktop launch
+  remain unverified. The external-browser fallback is available. Do not present a
+  rendered homepage or muted fixture as verification of protected streaming.
+
+- Final source regression run after review fixes: `.venv/bin/pytest -q` → **615 passed,
+  4 skipped in 32.74 s**. Review follow-up confirmed NSS and GLX/EGL files in AppDir.
+- Subsequent frozen test decoded MP3 but paused the muted fixture when hidden. Source
+  probe with normal playback at 1% volume passed foreground/background time advancement,
+  homepage loading and teardown. Smoke fixture updated accordingly with finally cleanup;
+  no production workaround or browser security flag was added. A final rebuild follows.
+
+- Release validation completed: AppImage `--self-test --network` all 10 PASS; real-display
+  `--browser-smoke --network` passed MP3 decoding, foreground/background time advancement,
+  homepage render and popup/profile cleanup. Screenshot `/tmp/sclm-listen-appimage.png`
+  inspected. This is automated real-display validation, not manual account/Go+ validation.
+- Installed tested 0.2.0 to `/home/john/Desktop/SoundCloud_Library_Manager.AppImage` and launched it.
+  SHA-256 `40bd2fdb6e057283831e0402083d3e0e9d85e6e959f2f9c6a4305756f2d39fba`. Original backup: `/home/john/soundcloud-library-manager/dist/desktop-backups/SoundCloud_Library_Manager-0.1.0-20261102-152248.AppImage`.
+  Installed size 189,008,376 bytes. Music/settings/history preserved.
+- User confirmation of actual account/failed-track playback remains pending. All changes
+  stay local; no GitHub push has occurred. See EVALUATION_REPORT.md for full scope/limits.
+
+- Installation build completed in133 s. Installed app logged Ready0.65 s after its Python
+  entry point; process and real X11 window confirmed. A nonfatal Qt host-portal registration
+  warning appeared during this programmatic launch; the window remained open. External
+  browser handoff in the user's desktop session is still a manual check.
+- Release smoke cleanup race resolved by deleting the test-owned QApplication before
+  removing its temporary profile. Final packaged browser test exited0.
+
+### 0.3.0 playback integration + Listen-page repair (2026-11-02, lead: Claude Opus 5.5)
+
+- Project selection: the Desktop AppImage's SHA-256 equals this repo's
+  `dist/…0.2.0…AppImage`; the menu entry launches it. `soundcloud-library-manager-codex`
+  was identified and left unmodified.
+- Root cause: SoundCloud only streams AAC/HLS; the PySide6 QtWebEngine has no AAC (and no
+  Widevine). It was not DRM for ordinary tracks (Firefox plays them without a CDM).
+  Replaced by the host's WebKitGTK in a helper process (`gui/webkit_player.py`), embedded
+  via X11 with frame sync disabled, and paused over MPRIS.
+- New local player (`gui/player.py`, QtMultimedia), persistent player bar, Library
+  Play/Add to queue/double-click, mutual pausing of local and web audio.
+- AppImage without QtWebEngine (94 MB). `--browser-smoke` was replaced by `--playback-smoke`.
+- Incident: test runs that muted WebKit at the GStreamer level made WirePlumber remember
+  `media.role:Music:mute=true`, silencing the user's local playback. Repaired and the test
+  mute removed; the smoke now uses a temporary null sink. Lesson: never mute at the
+  sound-server level in tests.
+- Verified (all real runs):
+  - pytest 628 passed / 4 skipped
+  - source and AppImage `--playback-smoke --network` PASS
+  - AppImage `--self-test` PASS
+  - audible per-stream capture: local −35 dBFS, web −22 dBFS, both unmuted on the real sink
+- Desktop AppImage replaced after the tests passed; the 0.2.0 backup is in
+  `dist/desktop-backups/`.
+- Still pending (user): signed-in and Go+ playback, hearing local playback after the fix,
+  double-click launch. See EVALUATION_REPORT.md.

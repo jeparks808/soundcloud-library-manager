@@ -1,12 +1,16 @@
 """Entry point of the frozen (PyInstaller / AppImage) build.
 
-Behaves exactly like ``python -m sclm`` (``sclm.app.main``), plus two packaging-only hooks
+Behaves exactly like ``python -m sclm`` (``sclm.app.main``), plus packaging-only hooks
 that never run in a normal launch:
 
 * ``--self-test [--network] [--download]``: checks the frozen environment (imports, Qt
   plugins, bundled libxcb-cursor, certifi, bundled ffmpeg, optionally a real yt-dlp
   preview/download) without opening a window, prints a report and exits 0/1.
   Implemented in ``packaging/sclm_selftest.py``.
+* ``--playback-smoke [--network] [--screenshot-dir DIR]``: drives the real window through
+  local playback and the embedded SoundCloud player in temporary data; audio goes to a
+  temporary null sink.
+  Implemented in ``packaging/sclm_playback_smoke.py``.
 * ``SCLM_SMOKE_QUIT_AFTER_MS=<n>``: quits the Qt event loop ``n`` ms after it starts, so
   smoke tests exercise the real startup *and* shutdown path (manager shutdown, DB close).
 """
@@ -55,6 +59,11 @@ def _install_smoke_quit(ms: int) -> None:
 def _main() -> int:
     _restore_child_environment()
     args = sys.argv[1:]
+    if "--playback-smoke" in args:
+        import sclm_playback_smoke
+
+        shots = args[args.index("--screenshot-dir") + 1] if "--screenshot-dir" in args else None
+        return sclm_playback_smoke.run(network="--network" in args, screenshot_dir=shots)
     if "--self-test" in args:
         import sclm_selftest
 

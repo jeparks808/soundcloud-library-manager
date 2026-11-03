@@ -168,6 +168,19 @@ QFrame#errorBanner {{ background: #3a1d1d; border: 1px solid {DANGER}; border-ra
 QFrame#errorBanner QLabel {{ color: #ffb4ae; }}
 QFrame#infoBanner {{ background: {BG_ALT}; border: 1px solid {BORDER}; border-radius: 6px; }}
 QFrame#card {{ background: {BG_ALT}; border: 1px solid {BORDER}; border-radius: 8px; }}
+
+QFrame#playerBar {{ background: {BG_ALT}; border-top: 1px solid {BORDER}; }}
+QLabel#playerTitle {{ font-weight: 600; }}
+QLabel#playerArt {{ background: {SURFACE}; border-radius: 4px; color: {TEXT_MUTED};
+    font-size: 16pt; }}
+QFrame#playerBar QToolButton {{ border-radius: 6px; padding: 3px; }}
+QFrame#playerBar QToolButton:hover {{ background: {SURFACE}; }}
+QFrame#playerBar QSlider::groove:horizontal {{ height: 4px; background: {BORDER};
+    border-radius: 2px; }}
+QFrame#playerBar QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
+QFrame#playerBar QSlider::handle:horizontal {{ background: {TEXT}; width: 12px;
+    margin: -4px 0; border-radius: 6px; }}
+QFrame#queuePopup {{ background: {BG_ALT}; border: 1px solid {BORDER}; }}
 """
 
 

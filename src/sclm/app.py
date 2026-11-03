@@ -184,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
                          manager=manager, bridge=bridge)
         window = MainWindow(ctx)
         window.show()
+        app.aboutToQuit.connect(window.shutdown_players)
     except Exception as exc:
         restore_signals()
         log.exception("Could not create the main window")

@@ -6,7 +6,8 @@ hand in the GUI only) · **partial** · **todo**. Updated by the lead engineer a
 "Offscreen" GUI tests are automated pytest-qt tests on `QT_QPA_PLATFORM=offscreen`. They are **not** manual
 verification. Manual GUI verification so far (user, 2026-11-02): startup on the real display, playlist fetch/preview, downloads — "its working great!".
 
-Last test run (lead, 2026-11-02, after Stage 5): `pytest -q` → **574 passed, 4 skipped**; download+gui repeated 30× → 0 failures; ordering tests 100× → 0 failures; `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
+Last test run (lead, 2026-11-02, 0.3.0): `pytest -q` → **628 passed, 4 skipped**; AppImage self-test + `--playback-smoke --network` PASS.
+Earlier run (lead, 2026-11-02, after Stage 5): `pytest -q` → **574 passed, 4 skipped**; download+gui repeated 30× → 0 failures; ordering tests 100× → 0 failures; `SCLM_NETWORK_TESTS=1 pytest -m network` → **4 passed**;
 lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_STATUS.md, Stage 2–4).
 
 | # | Requirement | Stage | State | Evidence |
@@ -61,3 +62,15 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | Q3 | Clear startup failure when a Qt system lib is missing | 6 | done+tested | tests/core/test_platform_check.py (8); lead ran it against the real missing lib → message + exit 1 |
 | Q3b | yt-dlp self-update (AppImage stays usable when SoundCloud changes) | 6 | done+tested | download/updater.py; tests/download/test_updater.py (16), 2 GUI tests; real-PyPI no-op check by lead. Install path of a truly newer release untestable until one exists |
 | Q2 | No DRM/authorization bypass | all | done+tested | Go+ preview-only and DRM formats → AuthRequiredError (network test); cookies only pass the user's own login |
+
+| L1 | Official SoundCloud Listen page + Queue/History links | 0.2→0.3 | done+tested | engine replaced by WebKitGTK helper (0.3.0); tests/gui/test_listening.py (protocol with fake helper, unavailable engine, signals); AppImage playback smoke: embedded page loads |
+| L2 | Independent persistent website login/profile | 0.3.0 | partial | profile `listening-webkit/` (0700, persistent cookies) created and reused by the helper; real account sign-in not yet done by the user |
+| L3 | Real SoundCloud playback in the app, continuing on other pages | 0.3.0 | done+tested | AppImage `--playback-smoke --network`: public AAC track plays (is-playing-audio), same process after page switch; audible capture −22 dBFS on the real sink |
+| L4 | Go+ / protected streaming inside the app | 0.3.0 | untested (limited engine) | no Widevine in WebKitGTK; error banner + "Open this track in my browser" (banner logic tested offline); real Go+ track needs the user's account |
+| L5 | Desktop AppImage update / GitHub publication | 0.3.0 | desktop done+tested; publication see EVALUATION_REPORT.md | backup verified; self-test + playback smoke PASS before replacement |
+| P1 | Local player: play/pause/stop, next/previous, seek, elapsed/total, volume/mute | 0.3.0 | done+tested | tests/gui/test_player.py (fake + real QtMultimedia); AppImage playback smoke |
+| P2 | Title/artist/artwork display | 0.3.0 | done+tested | test_real_mp3_seek_and_artwork; smoke checks cover art |
+| P3 | Queue, double-click to play, auto-advance | 0.3.0 | done+tested | test_library_double_click_plays_page_as_queue, end-of-media tests; smoke real double-click |
+| P4 | Missing/unplayable files handled gracefully | 0.3.0 | done+tested | missing reported once and skipped; all-failed stops (unit + real + smoke) |
+| P5 | Non-blocking GUI, playback persists across tabs, one audio source at a time | 0.3.0 | done+tested | QtMultimedia threads; smoke page switches; mutual pause local↔web (MPRIS) in smoke and test_web_and_local_playback_pause_each_other |
+| P6 | Local playback audible on the user's desktop | 0.3.0 | tested (automated), manual pending | per-stream capture −35 dBFS on the real sink after the PipeWire role-mute repair; user hearing check pending |

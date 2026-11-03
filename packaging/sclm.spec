@@ -5,9 +5,11 @@ Build through packaging/build_appimage.sh (which also assembles the AppImage), o
     .venv/bin/pyinstaller --noconfirm --clean --distpath build/pyinstaller/dist \
         --workpath build/pyinstaller/work packaging/sclm.spec
 
-Lean Qt: only QtCore/QtGui/QtWidgets (+ libQt6Svg for the SVG icon engine / image plugin),
-the xcb + offscreen platform plugins, JPEG/SVG image plugins, the SVG icon engine and the
-compose/ibus input-context plugins. PNG support is built into QtGui.
+Qt Widgets + QtMultimedia (FFmpeg backend plugin, for local playback). The SoundCloud
+website player is NOT bundled: it runs on the host's WebKitGTK through the system python3
+(src/sclm/gui/webkit_player.py, shipped as a data file). QtWebEngine is not included: the
+PySide6 build has no AAC decoder, which SoundCloud's streams require.
+Prune unrelated plugins and QML assets; PNG is built into QtGui.
 """
 
 import os
@@ -44,7 +46,10 @@ def _system_lib(name):
 
 
 # --- Python-level excludes ----------------------------------------------------------------
-QT_KEEP = {"QtCore", "QtGui", "QtWidgets", "QtSvg"}
+# QtMultimedia's FFmpeg plugin links QtNetwork/QtOpenGL/QtQml/QtQuick; QtTest is used by
+# the --playback-smoke packaging check only.
+QT_KEEP = {"QtCore", "QtGui", "QtWidgets", "QtSvg", "QtMultimedia", "QtNetwork", "QtOpenGL",
+           "QtQml", "QtQuick", "QtTest"}
 QT_ALL = [
     "Qt3DAnimation", "Qt3DCore", "Qt3DExtras", "Qt3DInput", "Qt3DLogic", "Qt3DRender",
     "QtAxContainer", "QtBluetooth", "QtCanvasPainter", "QtCharts", "QtConcurrent", "QtDBus",
@@ -65,8 +70,12 @@ EXCLUDES = [f"PySide6.{m}" for m in QT_ALL if m not in QT_KEEP] + [
 ]
 
 # --- Optional beets: bundled when installed in the build venv (pure Python, ~5 MB) ----------
-DATAS = [(str(PKG / "sclm.svg"), "sclm/resources")]
-HIDDEN = ["sclm_selftest"]
+DATAS = [(str(PKG / "sclm.svg"), "sclm/resources"),
+         # Run by the host python3 (needs the distribution's PyGObject/WebKitGTK), so they
+         # ship as plain files next to the frozen sclm.gui package.
+         (str(ROOT / "src/sclm/gui/webkit_player.py"), "sclm/gui"),
+         (str(ROOT / "src/sclm/gui/listening_policy.py"), "sclm/gui")]
+HIDDEN = ["sclm_selftest", "sclm_playback_smoke"]
 try:
     import beets  # noqa: F401
 except ImportError:
@@ -96,7 +105,10 @@ a = Analysis(
 QT_PREFIX = os.path.join("PySide6", "Qt")
 PLUGINS_KEEP = {
     "platforms/libqxcb.so",
+    "xcbglintegrations/libqxcb-glx-integration.so",
+    "xcbglintegrations/libqxcb-egl-integration.so",
     "platforms/libqoffscreen.so",        # headless runs / smoke tests
+    "multimedia/libffmpegmediaplugin.so",  # local playback (QMediaPlayer)
     "imageformats/libqjpeg.so",
     "imageformats/libqsvg.so",
     "iconengines/libqsvgicon.so",
@@ -147,7 +159,8 @@ def _prune_unreachable(binaries):
         name = os.path.basename(dest)
         return (".so" not in name  # executables, e.g. imageio-ffmpeg's ffmpeg binary
                 or typecode == "EXTENSION" or dest.replace(os.sep, "/").startswith("PySide6/Qt/plugins/")
-                or name.startswith("libpython") or name in XCB_HELPER_LIBS)
+                or name.startswith("libpython") or name in XCB_HELPER_LIBS
+                or name.startswith("libQt6FFmpegStub"))  # dlopen'ed by Qt's FFmpeg
 
     keep = set()
     todo = [e for e in binaries if is_root(e) and e[2] != "SYMLINK"]
