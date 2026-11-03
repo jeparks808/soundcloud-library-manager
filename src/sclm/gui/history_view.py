@@ -110,6 +110,7 @@ class HistoryModel(QAbstractTableModel):
 
 class HistoryView(QWidget):
     message = Signal(str)
+    listen_requested = Signal(str)
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -179,7 +180,12 @@ class HistoryView(QWidget):
         self.open_folder_btn.setEnabled(False)
         self.open_folder_btn.clicked.connect(self._open_folder)
 
+        self.listen_btn = QPushButton("Listen on SoundCloud")
+        self.listen_btn.setAccessibleName("Listen to the selected history track on SoundCloud")
+        self.listen_btn.setEnabled(False)
+        self.listen_btn.clicked.connect(self._listen)
         bottom = QHBoxLayout()
+        bottom.addWidget(self.listen_btn, 0, Qt.AlignmentFlag.AlignTop)
         bottom.addWidget(self.details, 1)
         bottom.addWidget(self.open_folder_btn, 0, Qt.AlignmentFlag.AlignTop)
 
@@ -233,6 +239,7 @@ class HistoryView(QWidget):
 
     def _show_details(self, *_args: object) -> None:
         rec = self.selected_record()
+        self.listen_btn.setEnabled(rec is not None)
         self.open_folder_btn.setEnabled(rec is not None and rec.file_path is not None)
         if rec is None:
             self.details.clear()
@@ -247,6 +254,19 @@ class HistoryView(QWidget):
                 lines.append("")
                 lines.append(rec.error.detail)
         self.details.setPlainText("\n".join(lines))
+
+    def _listen(self) -> None:
+        from sclm.gui.bridge import run_in_background
+        rec = self.selected_record()
+        if rec is None:
+            return
+        def done(track):
+            if track and track.url:
+                self.listen_requested.emit(track.url)
+            else:
+                self.message.emit("No SoundCloud URL is saved for this track. Paste its URL in Listen.")
+        run_in_background(lambda: self._ctx.storage.get_track(rec.track_id), done,
+                          lambda _: self.message.emit("Could not find the saved track URL."), parent=self)
 
     def _open_folder(self) -> None:
         rec = self.selected_record()

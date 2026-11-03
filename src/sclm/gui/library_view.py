@@ -87,6 +87,9 @@ class LibraryModel(QAbstractTableModel):
         self._rows = rows
         self.endResetModel()
 
+    def files(self) -> list[LibraryFile]:
+        return list(self._rows)
+
     def file_at(self, row: int) -> LibraryFile | None:
         return self._rows[row] if 0 <= row < len(self._rows) else None
 
@@ -94,6 +97,8 @@ class LibraryModel(QAbstractTableModel):
 class LibraryView(QWidget):
     message = Signal(str)
     library_changed = Signal()      # after a scan or tag edit: status bar count refresh
+    play_requested = Signal(object, int)    # list[LibraryFile] to queue, index to start at
+    enqueue_requested = Signal(object)      # list[LibraryFile]
     _scan_progress = Signal(int, int)
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None, *,
@@ -127,6 +132,12 @@ class LibraryView(QWidget):
         self.stop_scan_btn = QPushButton("Stop")
         self.stop_scan_btn.setAccessibleName("Stop scanning")
         self.stop_scan_btn.hide()
+        self.play_btn = QPushButton("Play")
+        self.play_btn.setAccessibleName("Play the selected file and queue the files after it")
+        self.play_btn.setToolTip("Play here (double-click a row). The rest of this page "
+                                 "becomes the play queue.")
+        self.enqueue_btn = QPushButton("Add to queue")
+        self.enqueue_btn.setAccessibleName("Add the selected file to the play queue")
         self.edit_btn = QPushButton("Edit tags…")
         self.edit_btn.setAccessibleName("Edit tags of the selected file")
         self.edit_btn.setShortcut("Ctrl+E")
@@ -137,6 +148,8 @@ class LibraryView(QWidget):
         self.prev_btn.setAccessibleName("Previous page of the library")
         self.next_btn.setAccessibleName("Next page of the library")
         self.count_label = set_role(QLabel(""), "muted")
+        self.play_btn.clicked.connect(self.play_selected)
+        self.enqueue_btn.clicked.connect(self.enqueue_selected)
         self.scan_btn.clicked.connect(self.scan)
         self.stop_scan_btn.clicked.connect(self.stop_scan)
         self.edit_btn.clicked.connect(self.edit_selected)
@@ -179,7 +192,7 @@ class LibraryView(QWidget):
         self.table.setColumnWidth(COL_ARTIST, 240)
         self.table.setColumnWidth(COL_TIME, 70)
         self.table.setColumnWidth(COL_SOURCE, 100)
-        self.table.doubleClicked.connect(lambda _i: self.edit_selected())
+        self.table.doubleClicked.connect(lambda _i: self.play_selected())
         self.table.selectionModel().selectionChanged.connect(self._update_buttons)
 
         bottom = QHBoxLayout()
@@ -188,6 +201,8 @@ class LibraryView(QWidget):
         bottom.addWidget(self.prev_btn)
         bottom.addWidget(self.next_btn)
         bottom.addSpacing(16)
+        bottom.addWidget(self.play_btn)
+        bottom.addWidget(self.enqueue_btn)
         bottom.addWidget(self.folder_btn)
         bottom.addWidget(self.edit_btn)
 
@@ -249,8 +264,8 @@ class LibraryView(QWidget):
 
     def _update_buttons(self, *_args: object) -> None:
         has = self.selected_file() is not None
-        self.edit_btn.setEnabled(has)
-        self.folder_btn.setEnabled(has)
+        for btn in (self.play_btn, self.enqueue_btn, self.edit_btn, self.folder_btn):
+            btn.setEnabled(has)
 
     # --- scanning ---------------------------------------------------------------------
 
@@ -332,6 +347,16 @@ class LibraryView(QWidget):
         self.error_banner.show_error(error)
 
     # --- row actions ------------------------------------------------------------------
+
+    def play_selected(self) -> None:
+        rows = self.table.selectionModel().selectedRows()
+        if rows:
+            self.play_requested.emit(self.model.files(), rows[0].row())
+
+    def enqueue_selected(self) -> None:
+        f = self.selected_file()
+        if f is not None:
+            self.enqueue_requested.emit([f])
 
     def open_selected_folder(self) -> None:
         f = self.selected_file()

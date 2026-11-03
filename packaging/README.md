@@ -40,8 +40,13 @@ both builds share them. `SCLM_HOME` still overrides them.
 
 ### What is bundled
 
-- Qt: QtCore, QtGui, QtWidgets and libQt6Svg. Plugins: xcb, offscreen, jpeg, svg, the svg
-  icon engine, and the compose/ibus input contexts. Plus the English Qt translations.
+- Qt Widgets and QtMultimedia with its FFmpeg media plugin (local player). Plugins:
+  xcb/offscreen, JPEG/SVG, SVG icon engine, compose/ibus input contexts and
+  `multimedia/libffmpegmediaplugin.so`. Qt WebEngine is no longer bundled (0.3.0: 94 MB
+  instead of 189 MB).
+- The Listen page's helper `sclm/gui/webkit_player.py` (+ `listening_policy.py`) as data
+  files. It runs under the **host** `/usr/bin/python3` with the host's WebKitGTK 4.1 and
+  GStreamer (`python3-gi gir1.2-webkit2-4.1 gstreamer1.0-libav`), which are not bundled.
 - `libxcb-cursor.so.0` and the other X11 helpers, placed next to the Qt libraries.
   `pyi_rth_sclm.py` preloads them.
 - yt-dlp, mutagen, certifi, imageio-ffmpeg's static ffmpeg 7.0.2 (used as the fallback after
@@ -55,7 +60,8 @@ both builds share them. `SCLM_HOME` still overrides them.
 - `sclm --self-test [--network] [--download]` checks the frozen environment and exits 0 or
   1. It never opens a window and uses only temporary directories. The checks cover imports,
   beets, the CA bundle, the XDG paths, the child environment, libxcb-cursor, Qt image and
-  icon plugins, and ffmpeg (`-version` plus an MP3 encode). `--network` adds an HTTPS GET
+  icon plugins, ffmpeg (`-version` plus an MP3 encode), a QtMultimedia MP3 decode, and
+  (warning only) the host WebKitGTK/AAC decoder for the Listen page. `--network` adds an HTTPS GET
   and a real yt-dlp preview. `--download` adds a 10 s test-track download converted with the
   bundled ffmpeg.
 - `SCLM_SMOKE_QUIT_AFTER_MS=<n>` quits the event loop n ms after startup. It is meant for
@@ -65,9 +71,30 @@ both builds share them. `SCLM_HOME` still overrides them.
 ### Limitations
 
 - yt-dlp is frozen at the version pinned in `requirements.txt`. SoundCloud changes break
-  old yt-dlp versions, so rebuild the AppImage after `pip install -U yt-dlp`. The app
-  cannot update yt-dlp itself.
+  old yt-dlp versions. Use Help → Update yt-dlp, or update the pinned dependencies and rebuild.
 - The AppImage is built against the build machine's glibc (Mint 22.x / Ubuntu 24.04, glibc
   2.39). It will not start on older distributions. Build on the oldest system you want to
   support.
 - There is no AppStream metainfo (built with `--no-appstream`) and no update information.
+
+
+### Playback smoke test (0.3.0)
+
+On a real X11 desktop:
+
+```sh
+./dist/SoundCloud_Library_Manager-0.3.0-x86_64.AppImage --playback-smoke --network --screenshot-dir /tmp/sclm-shots
+```
+
+It drives the real main window in temporary data (`SCLM_HOME`, `XDG_CONFIG_HOME`):
+double-click playback of generated MP3s with cover art, playback across page switches,
+seek/pause/volume/mute, a missing file skipped with a message, end of queue; then the
+Listen page's helper process. With `--network` it opens SoundCloud's official embed player
+for a public track, clicks Play (XTest), checks AAC playback continues on other pages in
+the same process, and that local and web playback pause each other (MPRIS). Audio goes to a
+temporary null sink that is unloaded afterwards; it never mutes streams at the sound-server
+level (WirePlumber would remember the mute for the user's own music streams). No user
+data, sign-in or library is read. Without `--network` only the helper start/stop is
+checked on the web side.
+
+Not covered: signed-in playback and Go+ tracks (need a real account; check manually).

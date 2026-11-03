@@ -779,14 +779,16 @@ worker threads. Logs must not contain cookie contents.
 
 ## 16. Dependency management
 
-- `pyproject.toml` declares lower bounds (`PySide6-Essentials`, `yt-dlp`, `mutagen`,
+- `pyproject.toml` declares lower bounds (`PySide6`, `yt-dlp`, `mutagen`,
   `imageio-ffmpeg`), the optional extra `[beets]`, the dev extra `[dev]`, the entry point
   `sclm = sclm.app:main` and the pytest configuration.
 - `requirements.txt` pins the tested runtime versions. `requirements-dev.txt` adds beets,
   pytest and pytest-qt.
-- We depend on **PySide6-Essentials** (QtCore, QtGui, QtWidgets) rather than the full PySide6
-  meta-package, which saves hundreds of MB of WebEngine and similar modules. Use only modules
-  from Essentials.
+- Since 0.3.0: `PySide6-Essentials` + `PySide6-Addons` (QtMultimedia for the local player;
+  its FFmpeg backend ships in the wheel). Qt WebEngine is no longer used. The Listen page
+  uses the **host's** WebKitGTK 4.1 + GStreamer through the system `python3`
+  (`python3-gi`, `gir1.2-webkit2-4.1`, `gstreamer1.0-libav`); these are runtime
+  dependencies of that page only and are not bundled in the AppImage.
 - Install: `python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt &&
   .venv/bin/pip install -e .`
 - ffmpeg needs no system package because imageio-ffmpeg bundles 7.0.2. A system ffmpeg on
@@ -803,8 +805,8 @@ worker threads. Logs must not contain cookie contents.
 - Cancellation can lag during network resolve (up to the 20 s socket timeout) and during an
   ffmpeg conversion. Quitting during such a resolve closes the window at once, but the
   process exits only when the stalled read returns.
-- Sign-in is only possible through a user-supplied cookies file. There is no OAuth or login
-  UI.
+- Downloader sign-in uses only a user-supplied cookies file. Listen uses the official
+  website login in an independent browser profile; its credentials never reach yt-dlp.
 - Artist/title duplicate detection is exact on the normalized key with ±2 s on duration. It
   does not do fuzzy string matching.
 - Playlist membership reflects what yt-dlp returned. A truncated extraction can mark tracks
@@ -821,3 +823,87 @@ the bundled copy (so a rebuilt app wins again), probe-imports it, and falls back
 bundled yt-dlp on any problem. This exists mainly for the frozen AppImage, which cannot be
 pip-upgraded; it works identically in a venv run. The GUI action runs `update()` through
 `run_in_background` and tells the user to restart.
+
+
+## 18. Listen page: official SoundCloud website (0.2.0, engine replaced in 0.3.0)
+
+**Why the engine changed.** SoundCloud serves its streams as AAC (`mp4a.40.2`) in HLS,
+played through Media Source Extensions (verified with yt-dlp's format list: only
+`hls_aac_96k`/`hls_aac_160k` remain for public tracks). The QtWebEngine in the PySide6
+wheels (Chromium 140) is built without proprietary codecs:
+`MediaSource.isTypeSupported('audio/mp4; codecs="mp4a.40.2"')` is `false`, so SoundCloud's
+player never created a media element and every track failed with "There was a problem
+playing this track". It also has no Widevine CDM. Rebuilding QtWebEngine with proprietary
+codecs is impractical on the target machine. The distribution's WebKitGTK (2.52 on Mint
+22) answers `true` and plays the stream through GStreamer's `avdec_aac` (verified: playback
+position advancing, same track).
+
+**Process model.**
+
+```
+MainWindow ── ListeningView (gui/listening_view.py)   address bar, status, error banner
+                 └─ WebKitBrowser (gui/listening_browser.py, QObject)
+                      ├─ QProcess: /usr/bin/python3 -I gui/webkit_player.py --data … --cache …
+                      │     GTK3 + WebKit2 4.1; JSON lines: commands on stdin, events on stdout
+                      └─ QWidget.createWindowContainer(QWindow.fromWinId(xid))   (X11)
+```
+
+* The helper is never imported by the app; it runs under the system interpreter because
+  PyGObject/WebKitGTK are distribution packages (the AppImage ships it as a data file).
+  `-I` and a cleaned environment keep the bundle's Python/Qt paths out.
+* Embedding (X11): the helper's window is an override-redirect GTK window, mapped off
+  screen first (GTK only paints after its own MapNotify) with compositor frame sync
+  disabled (`GdkX11.X11Window.set_frame_sync_enabled(False)` — otherwise GTK waits forever
+  for `_NET_WM_FRAME_DRAWN` once the window is reparented and renders two frames). Keyboard
+  focus moves both ways (verified with XTest). Non-X11 sessions: `--standalone`, the helper
+  shows its own window.
+* Events: `ready{xid}`, `url`, `loaded`, `history`, `audio{playing}` (WebKit's
+  `is-playing-audio`), `notice{code}`, `external{url}`, `playback_error`, `crashed`,
+  `unavailable` (exit 3). Commands: `navigate`, `back`, `forward`, `reload`, `pause`,
+  `show`, `quit`. Stdout is reserved for the protocol (fd 1 is redirected to stderr).
+* Pause: WebKit publishes the page's media session over MPRIS
+  (`org.mpris.MediaPlayer2.sclm_soundcloud.*`); `pause` calls `Player.Pause` there, with a
+  click on SoundCloud's own pause button (isolated script world) as fallback.
+  `MainWindow` pauses the website when local playback starts and pauses local playback when
+  the website starts (`web_audio_changed`).
+* Playback errors: every 3 s, while nothing plays, a read-only check in an isolated script
+  world looks for SoundCloud's "There was a problem playing" text and the page shows a banner
+  with **Open this track in my browser**.
+* Policy (`gui/listening_policy.py` + helper): user link clicks to non-SoundCloud hosts and
+  non-sign-in `target=_blank` links open in the system browser (HTTPS only); SoundCloud
+  links that open new windows load in the player itself; sign-in flows (about:blank,
+  `secure.soundcloud.com`, `/signin`, Google/Apple/Facebook identity hosts) get up to four
+  popup windows; non-HTTPS top-level schemes are blocked; downloads are cancelled;
+  permission requests are denied. `media_playback_requires_user_gesture` is off because
+  SoundCloud resumes from an async callback (Play did nothing after a pause otherwise).
+* Storage: `<data_dir>/listening-webkit/` (cookies.sqlite, local storage; 0700) and
+  `<cache_dir>/listening-webkit/`; both honor `SCLM_HOME`. The 0.2.0 QtWebEngine profile
+  `<data_dir>/listening-browser/` is left untouched. No cookies are exported, no requests
+  intercepted, no media saved, no DRM worked around, and URLs/page content are never
+  logged (stderr is kept only to explain an abnormal exit, with query strings removed).
+* Lifecycle: the helper starts on first visit to Listen and keeps running (and playing)
+  while other pages are shown — one process, no reloads. **Stop listening** and app exit
+  send `quit` (exit waits ≤1.5 s, then kills). If the helper dies, the page offers Home to
+  restart it.
+
+## 19. Local player (0.3.0)
+
+`gui/player.py`:
+
+* `PlayerController(QObject)` — play queue (`list[LibraryFile]`) + one `QMediaPlayer` /
+  `QAudioOutput`, created on first play so startup never loads the multimedia plugin.
+  `play_files(files, start)`, `enqueue`, `remove`, `clear`, `play_index`, `toggle`,
+  `play`, `pause`, `stop`, `next`, `previous` (restarts the track after 3 s), `seek`,
+  `set_volume` (perceptual → linear via `QtAudio.convertVolume`), `set_muted`. Volume and
+  mute persist in `QSettings` (`player/volume`, `player/muted`). `EndOfMedia` advances;
+  `InvalidMedia` / `errorOccurred` emit one message per failed file and skip it; if every
+  queued file fails, playback stops (no loop). Cover art comes from the backend's
+  `CoverArtImage` metadata (ID3 APIC) — no extra file reads.
+* `PlayerBar(QFrame)` — persistent strip below the page stack: artwork, title/artist,
+  previous/play-pause/stop/next, click-to-seek slider with elapsed/total, mute + volume,
+  **Queue (n)** popup. Shortcuts: Ctrl+Space and media keys (window focus).
+* Library page: double-click or **Play** queues the visible page starting at the row;
+  **Add to queue** appends. (Double-click used to open the tag editor; Ctrl+E/Edit tags…
+  still does.)
+
+All file reads and decoding happen in Qt's multimedia threads.

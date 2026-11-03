@@ -323,6 +323,7 @@ class QueueView(QWidget):
     """The Queue page: table + Cancel / Retry / Keep both / Cancel all / Clear finished."""
 
     message = Signal(str)   # transient status-bar text
+    listen_requested = Signal(str)
 
     def __init__(self, ctx: AppContext, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -353,6 +354,9 @@ class QueueView(QWidget):
         self.table.setColumnWidth(COL_PROGRESS, 220)
         self.table.setItemDelegateForColumn(COL_PROGRESS, ProgressDelegate(self.table))
 
+        self.listen_btn = QPushButton("Listen on SoundCloud")
+        self.listen_btn.setAccessibleName("Listen to the selected track on SoundCloud")
+        self.listen_btn.clicked.connect(self.listen_selected)
         self.cancel_btn = QPushButton("Cancel")
         self.retry_btn = QPushButton("Retry")
         self.keep_both_btn = QPushButton("Keep both")
@@ -376,7 +380,7 @@ class QueueView(QWidget):
             btn.clicked.connect(slot)
 
         bar = QHBoxLayout()
-        for btn in (self.cancel_btn, self.retry_btn, self.keep_both_btn):
+        for btn in (self.cancel_btn, self.retry_btn, self.keep_both_btn, self.listen_btn):
             bar.addWidget(btn)
         bar.addStretch(1)
         bar.addWidget(self.cancel_all_btn)
@@ -412,6 +416,11 @@ class QueueView(QWidget):
     def selected_jobs(self) -> list[DownloadJob]:
         rows = sorted({i.row() for i in self.table.selectionModel().selectedRows()})
         return [j for r in rows if (j := self.model.job_at(r)) is not None]
+
+    def listen_selected(self) -> None:
+        selected = self.selected_jobs()
+        if len(selected) == 1:
+            self.listen_requested.emit(selected[0].track.url)
 
     def cancel_selected(self) -> None:
         count = 0
@@ -464,6 +473,7 @@ class QueueView(QWidget):
 
     def _update_buttons(self, *_args: object) -> None:
         selected = self.selected_jobs()
+        self.listen_btn.setEnabled(len(selected) == 1)
         self.cancel_btn.setEnabled(any(not j.status.is_terminal for j in selected))
         self.retry_btn.setEnabled(any(j.status in (JobStatus.FAILED, JobStatus.CANCELLED,
                                                    JobStatus.SKIPPED_DUPLICATE)
