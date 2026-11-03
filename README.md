@@ -69,6 +69,12 @@ current page there, where your subscription plays it. In Firefox, DRM playback m
 enabled (Settings → General → "Play DRM-controlled content"). A subscription does not
 make protected tracks downloadable through this app.
 
+**DRM is not only Go+.** SoundCloud also encrypts many *free*, ad-supported tracks from
+label-distributed artists, for every listener (the track's streams are all
+`cbc-`/`ctr-encrypted-hls`). Downloads of such tracks fail with "SoundCloud only streams
+this track DRM-encrypted…" (category `drm_protected`, shown in History). Signing in or
+subscribing does not change this, and these tracks also need **Open in browser** to play.
+
 **Sign-in.** The website sign-in is stored in the app's own profile
 (`~/.local/share/soundcloud-library-manager/listening-webkit/`), separate from the
 downloader, which never receives it. After upgrading from 0.2.0 you need to sign in once
@@ -85,8 +91,8 @@ Download `SoundCloud_Library_Manager-<version>-x86_64.AppImage` from the GitHub 
 check it against the published SHA-256, make it executable and double-click it:
 
 ```sh
-sha256sum SoundCloud_Library_Manager-0.3.1-x86_64.AppImage
-chmod +x SoundCloud_Library_Manager-0.3.1-x86_64.AppImage
+sha256sum SoundCloud_Library_Manager-0.3.2-x86_64.AppImage
+chmod +x SoundCloud_Library_Manager-0.3.2-x86_64.AppImage
 ```
 
 The AppImage needs FUSE (`fusermount`/`fusermount3`); without it, run it with

@@ -180,6 +180,8 @@ def test_enqueue_ignores_tracks_with_active_jobs(make_manager, fake_ydl, make_tr
                    "restriction"), ErrorCategory.GEO_BLOCKED),
     (DownloadError("ERROR: [soundcloud] x: This video is only available for registered users"),
      ErrorCategory.AUTH_REQUIRED),
+    (DownloadError("ERROR: [soundcloud] 109665566: This video is DRM protected"),
+     ErrorCategory.DRM_PROTECTED),
 ])
 def test_access_failures_are_not_retried(run_one, make_track, fake_ydl, exc, category, storage,
                                          app_paths):

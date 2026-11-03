@@ -119,7 +119,7 @@ CASES = [
     ("go-plus", lambda: DownloadError("ERROR: This track requires a Go+ subscription"),
      ErrorCategory.AUTH_REQUIRED),
     ("drm", lambda: as_download_error(None, "This video is DRM protected"),
-     ErrorCategory.AUTH_REQUIRED),
+     ErrorCategory.DRM_PROTECTED),
     ("private-text", lambda: as_download_error(None, "This track is private"),
      ErrorCategory.PRIVATE),
     ("no-formats", lambda: as_download_error(

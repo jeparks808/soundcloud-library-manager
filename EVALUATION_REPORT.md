@@ -183,6 +183,29 @@ Options considered:
   `0f554984a9386616d96904a6a157e6ec7a31e1ad6bb544e4db4c0c9315b41286`. Backup:
   `dist/desktop-backups/SoundCloud_Library_Manager-0.3.0-*.AppImage`.
 
+## 0.3.2: DRM download errors labelled correctly
+
+The user reported that the "DRM-protected (typically SoundCloud Go+)" download failures did
+not look like real errors. Findings:
+
+- **The DRM itself is real, the wording was wrong.** The log shows yt-dlp's own
+  "This video is DRM protected" for 20 failed tracks. Five were checked through the
+  anonymous public API, including the user's "9k Freestyle" (Chris Travis, id 109665566):
+  - each is a free track, `monetization_model=AD_SUPPORTED`, `policy=MONETIZE`, not Go+
+  - every transcoding is `cbc-`/`ctr-encrypted-hls`, so SoundCloud encrypts these for all
+    listeners
+- **The app blamed Go+ and filed the failures under `auth_required`.** That suggested
+  signing in would help, and it does not.
+- **Fix:** new category `drm_protected` with `DrmProtectedError`. The message says that free
+  label tracks are encrypted too, that the track can't be downloaded, and to listen on
+  SoundCloud. No retry. Existing History rows keep their old text.
+- **Verified:**
+  - Unit and manager tests added: `test_drm_error_is_its_own_category_and_not_blamed_on_go_plus`,
+    and DRM is not retried.
+  - Full suite: 631 passed, 4 skipped.
+  - Live classification of the real "9k Freestyle" failure gives `drm_protected` with the
+    new message.
+
 ## Limitations
 
 - **Host packages needed for the Listen page:** `python3-gi gir1.2-webkit2-4.1 gstreamer1.0-libav`.

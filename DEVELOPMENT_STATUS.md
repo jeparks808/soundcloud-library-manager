@@ -279,3 +279,12 @@ The lead confirmed it's gone.
 - The laptop froze once during this work, while the user's app, Firefox and a WebKit probe
   were running. The previous boot's journal shows no OOM kill or GPU hang. Probes now run
   under `systemd-run --scope -p MemoryMax` with timeouts.
+
+### 0.3.2 DRM download errors (2026-11-02, lead: Claude Opus 5.5)
+
+- User flagged "DRM-protected (typically SoundCloud Go+)" failures as confusing. They are
+  real DRM, but on free `AD_SUPPORTED` label tracks (e.g. Chris Travis "9k Freestyle"): every
+  transcoding is `cbc-`/`ctr-encrypted-hls`. Added a `drm_protected` category /
+  `DrmProtectedError` with an accurate message instead of `auth_required` + "Go+".
+- Declined, earlier in this session: a DRM-circumventing download fallback. The Reddit
+  OAuth-header method equals the app's existing cookies-file sign-in and cannot get past DRM.

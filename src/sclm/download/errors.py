@@ -7,7 +7,8 @@ chain (``exc_info``, ``cause``, ``__cause__``, ``__context__``) and classify by 
 type first, then by HTTP status, then by message text.
 
 Only NETWORK is retried automatically. Access restrictions (private, geo, sign-in / Go+,
-DRM) are reported and never worked around.
+DRM) are reported and never worked around. DRM is its own category: signing in does not
+help, because SoundCloud encrypts some free tracks for every listener.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from collections.abc import Iterator
 
 from sclm.core.errors import (
     AuthRequiredError,
+    DrmProtectedError,
     FFmpegError,
     FFmpegNotFoundError,
     FileSystemError,
@@ -34,8 +36,7 @@ from sclm.core.errors import (
 _MAX_DETAIL = 2000
 _MAX_CHAIN = 12
 
-DRM_MESSAGE = ("This track is DRM-protected (typically SoundCloud Go+). "
-               "SCLM does not bypass DRM.")
+DRM_MESSAGE = DrmProtectedError.default_message
 PREVIEW_ONLY_MESSAGE = ("Only a 30-second preview of this track is available (SoundCloud Go+). "
                         "SCLM does not save previews as full tracks.")
 
@@ -167,7 +168,7 @@ def classify_ytdlp_error(exc: BaseException) -> SclmError:
     if _GEO.search(text):
         return GeoBlockedError(detail=detail)
     if _DRM.search(text):
-        return AuthRequiredError(DRM_MESSAGE, detail=detail)
+        return DrmProtectedError(detail=detail)
 
     for e in chain:
         status = _http_status(e)

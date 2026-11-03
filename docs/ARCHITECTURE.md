@@ -278,6 +278,7 @@ exception: `OSError` becomes FILESYSTEM, anything unrecognized becomes UNKNOWN.
 | `geo_blocked` | `GeoBlockedError` | no | yt-dlp `GeoRestrictedError`, "not available in your country" |
 | `private` | `PrivateTrackError` | no | "private", 403 on a private set |
 | `auth_required` | `AuthRequiredError` | no | "sign in", "login required", "Go+", only preview formats |
+| `drm_protected` | `DrmProtectedError` | no | yt-dlp "This video is DRM protected": every transcoding is `ctr-`/`cbc-encrypted-hls`. SoundCloud does this for many free (`AD_SUPPORTED`) label tracks too, so it is not an account problem |
 | `network` | `NetworkError` | **yes** | `URLError`, timeouts, connection reset, DNS failure, HTTP 429/5xx, `TransportError` |
 | `ffmpeg` | `FFmpegError` / `FFmpegNotFoundError` | no | yt-dlp `PostProcessingError`; `detail` holds the last 15 stderr lines (kept by `ytdlp_opts.build_download_ydl`, §13) plus "FFmpeg used: <path> (from settings\|path\|bundled)" |
 | `filesystem` | `FileSystemError` | no | ENOSPC, EACCES, bad library path, tag write failure |
