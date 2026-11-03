@@ -61,6 +61,7 @@ lead end-to-end script against real SoundCloud → pass (details in DEVELOPMENT_
 | Q1 | Linux desktop launcher | 7 | done+tested | AppImage on ~/Desktop (executable, trusted); Mint menu entry repointed to it (desktop-file-validate OK). Frozen app: self-test 11/11 incl. real preview; SIGTERM → clean shutdown, exit 0 (lead-run). Double-click itself still needs the user |
 | Q3 | Clear startup failure when a Qt system lib is missing | 6 | done+tested | tests/core/test_platform_check.py (8); lead ran it against the real missing lib → message + exit 1 |
 | Q3b | yt-dlp self-update (AppImage stays usable when SoundCloud changes) | 6 | done+tested | download/updater.py; tests/download/test_updater.py (16), 2 GUI tests; real-PyPI no-op check by lead. Install path of a truly newer release untestable until one exists |
+| R11 | DRM failures reported as DRM (not sign-in/Go+) | 0.3.2 | done+tested | DrmProtectedError / `drm_protected`; test_errors drm case, test_manager no-retry, test_models message; live check on Chris Travis "9k Freestyle" |
 | Q2 | No DRM/authorization bypass | all | done+tested | Go+ preview-only and DRM formats → AuthRequiredError (network test); cookies only pass the user's own login |
 
 | L1 | Official SoundCloud Listen page + Queue/History links | 0.2→0.3 | done+tested | engine replaced by WebKitGTK helper (0.3.0); tests/gui/test_listening.py (protocol with fake helper, unavailable engine, signals); AppImage playback smoke: embedded page loads |

@@ -25,6 +25,7 @@ class ErrorCategory(StrEnum):
     GEO_BLOCKED = "geo_blocked"
     PRIVATE = "private"
     AUTH_REQUIRED = "auth_required"    # needs sign-in / Go+ / not authorized
+    DRM_PROTECTED = "drm_protected"    # SoundCloud only offers DRM-encrypted streams
     NETWORK = "network"                # timeouts, DNS, connection reset, HTTP 5xx/429
     FFMPEG = "ffmpeg"                  # conversion failed or ffmpeg missing
     FILESYSTEM = "filesystem"          # permissions, disk full, bad path
@@ -97,6 +98,16 @@ class AuthRequiredError(DownloadError):
     category = ErrorCategory.AUTH_REQUIRED
     default_message = ("This track requires a SoundCloud sign-in or subscription. "
                        "SCLM does not bypass access restrictions.")
+
+
+class DrmProtectedError(DownloadError):
+    """Every stream SoundCloud offers is DRM-encrypted. Not an account problem: SoundCloud
+    encrypts many free, label-distributed tracks as well as Go+ tracks, for everyone."""
+
+    category = ErrorCategory.DRM_PROTECTED
+    default_message = ("SoundCloud only streams this track DRM-encrypted (common for "
+                       "label-released tracks, free ones included, not only Go+). It can't be "
+                       "downloaded; SCLM does not bypass DRM. Listen to it on SoundCloud.")
 
 
 class NetworkError(DownloadError):

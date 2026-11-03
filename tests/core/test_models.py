@@ -7,6 +7,7 @@ import pytest
 
 from sclm.core.errors import (
     AuthRequiredError,
+    DrmProtectedError,
     ErrorCategory,
     ErrorInfo,
     FFmpegError,
@@ -131,6 +132,13 @@ def test_error_categories_and_retryability():
     assert info.retryable
     assert isinstance(GeoBlockedError(), SclmError)
     assert "bypass" in AuthRequiredError().user_message
+
+
+def test_drm_error_is_its_own_category_and_not_blamed_on_go_plus():
+    exc = DrmProtectedError()
+    assert exc.category is ErrorCategory.DRM_PROTECTED and not exc.retryable
+    message = exc.user_message
+    assert "bypass DRM" in message and "free" in message and "not only Go+" in message
 
 
 def test_custom_user_message_and_str():

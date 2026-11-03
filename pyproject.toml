@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sclm"
-version = "0.3.1"
+version = "0.3.2"
 description = "SoundCloud Library Manager: download authorized SoundCloud tracks/playlists, convert to MP3, tag and organize them."
 readme = "CLAUDE.md"
 requires-python = ">=3.12"
