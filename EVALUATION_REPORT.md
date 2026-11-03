@@ -244,9 +244,16 @@ required that videos available only DRM-protected be labelled and never download
 - **Timings** (i5-5350U, source build):
   - Search: 10.5 s, including the first yt-dlp import.
   - Checking 6 videos in parallel: 28 s more.
+- **AppImage** (sha256 `cdfb1def…6d03`):
+  - `--self-test` passed.
+  - `--playback-smoke --network` passed every step. A new Alternatives step lists a
+    seeded DRM failure; in the frozen bundle, YouTube search gave 6 candidates, all
+    downloadable, the first a match at Δ +2.3 s, Opus 147 kbps. Nothing was downloaded.
+  - Launched from the Desktop path in an isolated `SCLM_HOME`: Ready after 0.64 s, and
+    SIGTERM shut it down cleanly.
+  - The previous 0.3.2 desktop copy is backed up in `dist/desktop-backups/`.
 - **Not verified:**
   - A real YouTube video offered only with DRM (none found to test with).
-  - The new page in the AppImage beyond the self-test and smoke run below.
   - The user's own use of the page.
 
 
