@@ -79,6 +79,22 @@ def test_lazy_load_stop_reopen_and_failure(qtbot, app_paths):
     view.stop()
 
 
+def test_browser_view_fills_the_page_height(qtbot, app_paths):
+    view = ListeningView(app_paths, browser_factory=FakeBrowser)
+    qtbot.addWidget(view)
+    view.resize(1150, 700)
+    view.show()
+    view.activate()
+    page = view.browser.view
+    qtbot.waitUntil(lambda: page.width() > 1000)                 # layout applied
+    below = view.height() - page.geometry().bottom()
+    assert below < 40, (page.geometry(), view.size())   # only the page margin is left
+    view.resize(1150, 900)
+    qtbot.waitUntil(lambda: view.height() - page.geometry().bottom() < 40)
+    view.stop()
+    assert view.placeholder.isVisible()
+
+
 def test_missing_engine_fallback(qtbot, app_paths):
     def missing(*_):
         raise ImportError("secret path")

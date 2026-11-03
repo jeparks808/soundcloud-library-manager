@@ -46,6 +46,31 @@ def _load_null_sink() -> str | None:
     return out.stdout.strip()
 
 
+def _x_ancestors(xid: int) -> list[int]:
+    """X window ids from ``xid``'s parent up to the root (XQueryTree)."""
+    x11 = ctypes.CDLL("libX11.so.6")
+    x11.XOpenDisplay.restype = ctypes.c_void_p
+    display = ctypes.c_void_p(x11.XOpenDisplay(None))
+    chain = []
+    try:
+        while True:
+            root, parent = ctypes.c_ulong(), ctypes.c_ulong()
+            children, count = ctypes.c_void_p(), ctypes.c_uint()
+            if not x11.XQueryTree(display, ctypes.c_ulong(xid), ctypes.byref(root),
+                                  ctypes.byref(parent), ctypes.byref(children),
+                                  ctypes.byref(count)):
+                break
+            if children:
+                x11.XFree(children)
+            chain.append(parent.value)
+            if parent.value in (0, root.value):
+                break
+            xid = parent.value
+    finally:
+        x11.XCloseDisplay(display)
+    return chain
+
+
 def run(network: bool = False, screenshot_dir: str | None = None) -> int:
     tmp_root = tempfile.TemporaryDirectory(prefix="sclm-playback-smoke-")
     tmp = Path(tmp_root.name)
@@ -197,6 +222,14 @@ def run(network: bool = False, screenshot_dir: str | None = None) -> int:
         until(lambda: browser.container is not None or not browser.embedded, 5000, "embedding")
         say(f"PASS web: player process pid {process.processId()} started "
             f"({'embedded' if browser.embedded else 'own window'})")
+        if browser.embedded:
+            # The helper window must stay inside the container. A window manager that adopts
+            # it (override-redirect lost) reparents it into a decorated frame instead.
+            wait(1500)
+            chain = _x_ancestors(int(browser._window.winId()))
+            assert int(window.winId()) in chain, \
+                f"helper window ancestors {[hex(w) for w in chain]} miss the main window"
+            say("PASS web: helper window embedded in the container, not managed by the WM")
         loaded: list[bool] = []
         browser.loaded.connect(loaded.append)
         browser.audio_changed.connect(lambda p: say(f"  website audio playing={p}"))

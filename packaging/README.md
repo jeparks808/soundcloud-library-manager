@@ -83,7 +83,7 @@ both builds share them. `SCLM_HOME` still overrides them.
 On a real X11 desktop:
 
 ```sh
-./dist/SoundCloud_Library_Manager-0.3.0-x86_64.AppImage --playback-smoke --network --screenshot-dir /tmp/sclm-shots
+./dist/SoundCloud_Library_Manager-0.3.1-x86_64.AppImage --playback-smoke --network --screenshot-dir /tmp/sclm-shots
 ```
 
 It drives the real main window in temporary data (`SCLM_HOME`, `XDG_CONFIG_HOME`):

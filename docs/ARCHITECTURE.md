@@ -855,7 +855,10 @@ MainWindow ── ListeningView (gui/listening_view.py)   address bar, status, e
   screen first (GTK only paints after its own MapNotify) with compositor frame sync
   disabled (`GdkX11.X11Window.set_frame_sync_enabled(False)` — otherwise GTK waits forever
   for `_NET_WM_FRAME_DRAWN` once the window is reparented and renders two frames). Keyboard
-  focus moves both ways (verified with XTest). Non-X11 sessions: `--standalone`, the helper
+  focus moves both ways (verified with XTest). The foreign `QWindow` gets
+  `Qt.BypassWindowManagerHint` before embedding: otherwise Qt rewrites its X attributes
+  without override-redirect, and a window manager could adopt the helper window as a
+  separate decorated window when it was mapped before the reparent (seen 1 in 5 runs). Non-X11 sessions: `--standalone`, the helper
   shows its own window.
 * Events: `ready{xid}`, `url`, `loaded`, `history`, `audio{playing}` (WebKit's
   `is-playing-audio`), `notice{code}`, `external{url}`, `playback_error`, `crashed`,

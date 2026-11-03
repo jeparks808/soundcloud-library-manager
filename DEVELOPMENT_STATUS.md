@@ -242,7 +242,8 @@ The lead confirmed it's gone.
   `dist/…0.2.0…AppImage`; the menu entry launches it. `soundcloud-library-manager-codex`
   was identified and left unmodified.
 - Root cause: SoundCloud only streams AAC/HLS; the PySide6 QtWebEngine has no AAC (and no
-  Widevine). It was not DRM for ordinary tracks (Firefox plays them without a CDM).
+  Widevine). It was not DRM for ordinary tracks (their transcodings are plain `hls` AAC; the earlier
+  note that Firefox has no CDM was wrong — its active profile has Widevine).
   Replaced by the host's WebKitGTK in a helper process (`gui/webkit_player.py`), embedded
   via X11 with frame sync disabled, and paused over MPRIS.
 - New local player (`gui/player.py`, QtMultimedia), persistent player bar, Library
@@ -261,3 +262,20 @@ The lead confirmed it's gone.
   `dist/desktop-backups/`.
 - Still pending (user): signed-in and Go+ playback, hearing local playback after the fix,
   double-click launch. See EVALUATION_REPORT.md.
+
+### 0.3.1 Listen view height + Go+ investigation (2026-11-02, lead: Claude Opus 5.5)
+
+- User confirmed (manual): Listen-tab playback signed in, and local library playback, both work.
+- Embedding race fixed: Qt cleared override-redirect on the adopted GTK window, so the WM
+  occasionally framed it as a separate window (1/5 smoke runs). Fix: BypassWindowManagerHint;
+  smoke now checks the X ancestry.
+- User report: the Listen web view used only the top ~300 px. Cause: a leftover layout
+  spacer shared the stretch with the browser widget. Fixed and covered by a regression test
+  that fails on the old layout; real-window probe confirms the view follows resizes.
+- Go+: not playable in-app. Go+ (`SUB_HIGH_TIER`) full streams are DRM-encrypted for
+  subscribers. Distribution WebKitGTK exposes no EME at all, and Firefox (the user's
+  default browser, Widevine enabled) is the legitimate route. The UI and README now say
+  this plainly. Corrected the earlier wrong note that the user's Firefox had no Widevine.
+- The laptop froze once during this work, while the user's app, Firefox and a WebKit probe
+  were running. The previous boot's journal shows no OOM kill or GPU hang. Probes now run
+  under `systemd-run --scope -p MemoryMax` with timeouts.
